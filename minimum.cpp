@@ -35,7 +35,7 @@ int main() {
         arr[i] = distrib(gen);
     }
     // add artificial minimum 
-    arr[n-1] = 0;
+    arr[n-1] = -1;
     // find the minimum of the array
     std::cout << "Minimum: " << findMin(arr) << std::endl;
     return 0;
