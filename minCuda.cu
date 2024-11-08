@@ -9,13 +9,23 @@
 
 // write a kernel that computes the minimum of an array of integers
 __global__ void findMinFixpointKernel(int *arr, int *size, int *min) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    // every threads processes its own portion of the array based on its id
-    // ensure that the index is within the bounds of the array
-    if (idx < *size) {
-        if(arr[idx] < *min) {
-            *min = arr[idx];
-        }
+    // global thread identifier
+    unsigned int unique_id = blockIdx.x * blockDim.x + threadIdx.x;
+    // thread identifier within the block (used to access share memory)
+    unsigned int thread_id = threadIdx.x;
+    __shared__ int minChunk[BLOCK_SIZE];
+
+    // load elements into shared memory only if within bounds
+    if (unique_id < *size) {
+        minChunk[thread_id] = arr[unique_id];
+    } else {
+        // make sure that values out of bounds are set to a large value
+        minChunk[thread_id] = INT_MAX;  
+    }
+
+    // update the global minimum if a smaller value is found within the block
+    if(thread_id < *size && minChunk[thread_id] < *min) {
+        *min = minChunk[thread_id];
     }
 }
 
