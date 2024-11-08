@@ -34,16 +34,19 @@ __global__ void findMinKernel(int *arr, int *size, int *min) {
     unsigned int thread_id = threadIdx.x;
     __shared__ int minChunk[BLOCK_SIZE];
 
-    // Load elements into shared memory only if within bounds
+    // load elements into shared memory only if within bounds
     if (unique_id < *size) {
         minChunk[thread_id] = arr[unique_id];
     } else {
-        minChunk[thread_id] = INT_MAX;  // Set to a large value if out of bounds
+        // make sure that values out of bounds are set to a large value
+        minChunk[thread_id] = INT_MAX;  
     }
 
     __syncthreads();
 
-    // Reduction to find the minimum in this block
+    // perform reduction to find the minimum in the current block
+    // this has complexity O(log(n)) where n is the number of elements in the block
+    // since the reduction pattern amounts to organizing the elements in a binary tree
     for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1) {
         if (thread_id < s) {
             if (minChunk[thread_id] > minChunk[thread_id + s]) {
@@ -53,7 +56,8 @@ __global__ void findMinKernel(int *arr, int *size, int *min) {
         __syncthreads();
     }
 
-    // Atomic update of global minimum from each block's minimum
+    // perform atomic update of global minimum from local minima of each block
+    // which is found in the first element of the shared memory (after reduction)
     if (thread_id == 0) {
         atomicMin(min, minChunk[0]);
     }
@@ -72,26 +76,27 @@ void kernel_wrapper(std::vector<int> &arr)
     // allocate memory on the device
     cudaError_t err;
     err = cudaMalloc((void **)&d_arr, arr.size() * sizeof(int));
-    // get last error and check if it is not a success
-
-    cudaMalloc((void **)&d_min, sizeof(int));
+    if(cudaGetLastError() != cudaSuccess) {
+        printf("Error0: %s\n", cudaGetErrorString(err));
+    }
+    err = cudaMalloc((void **)&d_min, sizeof(int));
     if(cudaGetLastError() != cudaSuccess) {
         printf("Error1: %s\n", cudaGetErrorString(err));
     }
-    cudaMalloc((void **)&d_size, sizeof(int));
+    err = cudaMalloc((void **)&d_size, sizeof(int));
     if(cudaGetLastError() != cudaSuccess) {
         printf("Error2: %s\n", cudaGetErrorString(err));
     }
     // initialize all the device variables
-    cudaMemcpy(d_arr, arr.data(), arr.size() * sizeof(int), cudaMemcpyHostToDevice);
+    err = cudaMemcpy(d_arr, arr.data(), arr.size() * sizeof(int), cudaMemcpyHostToDevice);
     if(cudaGetLastError() != cudaSuccess) {
         printf("Error3: %s\n", cudaGetErrorString(err));
     }
-    cudaMemcpy(d_min, &min_value, sizeof(int), cudaMemcpyHostToDevice);
+    err = cudaMemcpy(d_min, &min_value, sizeof(int), cudaMemcpyHostToDevice);
     if(cudaGetLastError() != cudaSuccess) {
         printf("Error4: %s\n", cudaGetErrorString(err));
     }
-    cudaMemcpy(d_size, &size, sizeof(int), cudaMemcpyHostToDevice);
+    err = cudaMemcpy(d_size, &size, sizeof(int), cudaMemcpyHostToDevice);
     if(cudaGetLastError() != cudaSuccess) {
         printf("Error5: %s\n", cudaGetErrorString(err));
     }
@@ -108,10 +113,10 @@ void kernel_wrapper(std::vector<int> &arr)
         // call the kernel
         findMinFixpointKernel<<<BLOCK_SIZE, BLOCK_SIZE>>>(d_arr, d_size, d_min);
         if(cudaGetLastError() != cudaSuccess) {
-            printf("Kernel Error: %s\n", cudaGetErrorString(err));
+            printf("Fixpoint kernel Error: %s\n", cudaGetErrorString(err));
         }
         // copy the result back to the host for comparison
-        cudaMemcpy(&min_value, d_min, sizeof(int), cudaMemcpyDeviceToHost);
+        err = cudaMemcpy(&min_value, d_min, sizeof(int), cudaMemcpyDeviceToHost);
         if(cudaGetLastError() != cudaSuccess) {
             printf("Memcpy Error: %s\n", cudaGetErrorString(err));
         }
@@ -127,7 +132,7 @@ void kernel_wrapper(std::vector<int> &arr)
     // ----------------- PARALLEL REDUCTION KERNEL ----------------- //
     // reset min_value
     min_value = 1000;
-    cudaMemcpy(d_min, &min_value, sizeof(int), cudaMemcpyHostToDevice);
+    err = cudaMemcpy(d_min, &min_value, sizeof(int), cudaMemcpyHostToDevice);
     if(cudaGetLastError() != cudaSuccess) {
         printf("Error6: %s\n", cudaGetErrorString(err));
     }
@@ -135,10 +140,13 @@ void kernel_wrapper(std::vector<int> &arr)
     // call the kernel
     findMinKernel<<<BLOCK_SIZE, BLOCK_SIZE>>>(d_arr, d_size, d_min);
     if(cudaGetLastError() != cudaSuccess) {
-        printf("Kernel Error: %s\n", cudaGetErrorString(err));
+        printf("Reduction kernel Error: %s\n", cudaGetErrorString(err));
     }
     // copy the result back to the host
-    cudaMemcpy(&min_value, d_min, sizeof(int), cudaMemcpyDeviceToHost);
+    err = cudaMemcpy(&min_value, d_min, sizeof(int), cudaMemcpyDeviceToHost);
+    if(cudaGetLastError() != cudaSuccess) {
+        printf("Memcpy Error: %s\n", cudaGetErrorString(err));
+    }
     end = clock();
     time_taken = double(end - start) / double(CLOCKS_PER_SEC);
     std::cout << "Time taken Cuda: " << time_taken << std::endl;
