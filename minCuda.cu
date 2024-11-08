@@ -4,36 +4,53 @@
 #include <random>
 #include <iostream>
 #include <ctime>
-// extern "C++"
-// {
-// #include "../../include/CGSolver.hpp"
-// #include "../../include/CGSolverCuda.hpp"
-// }
 
 #define BLOCK_SIZE 1024
 
 // write a kernel that computes the minimum of an array of integers
-__global__ void findMinFixpointKernel(int *arr, int *n, int *min) {
+__global__ void findMinFixpointKernel(int *arr, int *size, int *min) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    // every threads processes tis own portion of the array based on its id
+    // every threads processes its own portion of the array based on its id
     // ensure that the index is within the bounds of the array
-    if (idx < *n) {
+    if (idx < *size) {
         if(arr[idx] < *min) {
             *min = arr[idx];
         }
     }
 }
 
-__global__ void findMinKernel(int *arr, int *n, int *min) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    // every threads processes tis own portion of the array based on its id
-    if (idx < *n) {
-        // compute the minimum using a reduction pattern
-        *min = arr[idx];
+__global__ void findMinKernel(int *arr, int *size, int *min) {
+    unsigned int unique_id = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int thread_id = threadIdx.x;
+    __shared__ int minChunk[BLOCK_SIZE];
+
+    // Load elements into shared memory only if within bounds
+    if (unique_id < *size) {
+        minChunk[thread_id] = arr[unique_id];
+    } else {
+        minChunk[thread_id] = INT_MAX;  // Set to a large value if out of bounds
+    }
+
+    __syncthreads();
+
+    // Reduction to find the minimum in this block
+    for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1) {
+        if (thread_id < s) {
+            if (minChunk[thread_id] > minChunk[thread_id + s]) {
+                minChunk[thread_id] = minChunk[thread_id + s];
+            }
+        }
+        __syncthreads();
+    }
+
+    // Atomic update of global minimum from each block's minimum
+    if (thread_id == 0) {
+        atomicMin(min, minChunk[0]);
     }
 }
 
-int kernel_wrapper(std::vector<int> &arr)
+
+void kernel_wrapper(std::vector<int> &arr)
 {
     int *d_arr;
     int *d_min;
@@ -69,11 +86,12 @@ int kernel_wrapper(std::vector<int> &arr)
         printf("Error5: %s\n", cudaGetErrorString(err));
     }
 
+    // ----------------- FIXPOINT MODEL ----------------- //
     // measure time
     time_t start, end;
     start = clock();
 
-    // loop until min_value converges to a fixpoint
+    // loop until min_value converges to a fixpoint => does not change between iterations
     while(min_value < prev_min_value) {
         // update the previous value
         prev_min_value = min_value;
@@ -82,7 +100,7 @@ int kernel_wrapper(std::vector<int> &arr)
         if(cudaGetLastError() != cudaSuccess) {
             printf("Kernel Error: %s\n", cudaGetErrorString(err));
         }
-        // copy the result back to the host
+        // copy the result back to the host for comparison
         cudaMemcpy(&min_value, d_min, sizeof(int), cudaMemcpyDeviceToHost);
         if(cudaGetLastError() != cudaSuccess) {
             printf("Memcpy Error: %s\n", cudaGetErrorString(err));
@@ -92,15 +110,36 @@ int kernel_wrapper(std::vector<int> &arr)
 
     end = clock();
     double time_taken = double(end - start) / double(CLOCKS_PER_SEC);
+    std::cout << "Time taken by fixpoint iteration: " << time_taken << std::endl;
+    std::cout << "Number of fixpoint iterations: " << iters << std::endl;
+    printf("Fixpoint computed minimum value is %d\n", min_value);
+
+    // ----------------- PARALLEL REDUCTION KERNEL ----------------- //
+    // reset min_value
+    min_value = 1000;
+    cudaMemcpy(d_min, &min_value, sizeof(int), cudaMemcpyHostToDevice);
+    if(cudaGetLastError() != cudaSuccess) {
+        printf("Error6: %s\n", cudaGetErrorString(err));
+    }
+    start = clock();
+    // call the kernel
+    findMinKernel<<<BLOCK_SIZE, BLOCK_SIZE>>>(d_arr, d_size, d_min);
+    if(cudaGetLastError() != cudaSuccess) {
+        printf("Kernel Error: %s\n", cudaGetErrorString(err));
+    }
+    // copy the result back to the host
+    cudaMemcpy(&min_value, d_min, sizeof(int), cudaMemcpyDeviceToHost);
+    end = clock();
+    time_taken = double(end - start) / double(CLOCKS_PER_SEC);
     std::cout << "Time taken Cuda: " << time_taken << std::endl;
+    std::cout << "Time taken by parallel reduction: " << time_taken << std::endl;
+    std::cout << "Parallel reduction computed minimum value is " << min_value << std::endl;
 
     // copy the result back to the host
     cudaMemcpy(&min_value, d_min, sizeof(int), cudaMemcpyDeviceToHost);
     cudaFree(d_arr);
     cudaFree(d_min);
     cudaFree(d_size);
-    std::cout << "Number of iterations: " << iters << std::endl;
-    return min_value;
 }
 
 // serial CPU function for comparison
@@ -118,7 +157,7 @@ int main() {
     int n = 1000000;
     // generate array of random integers of size n
     // Initialize a random number generator
-    int min = 1;
+    int min = 2;
     int max = 1000;
     // initialize random number generator
     std::random_device rd;
@@ -132,8 +171,7 @@ int main() {
     // add artificial minimum 
     arr[n-1] = -21;
     // allocate memory on the devide
-    int min_value = kernel_wrapper(arr);
-    printf("Cuda computed minimum value is %d\n", min_value);
+    kernel_wrapper(arr);
 
     time_t start, end;
     start = clock();
