@@ -6,9 +6,6 @@ NVCC = nvcc
 CXXFLAGS = -O3 -funroll-loops -march=native
 NVCCFLAGS = -dlto -arch=sm_70 -O3 -use_fast_math -Xptxas -O3 -Xlinker -O3 -Xcompiler -O3
 
-# Libraries
-# LIBS = -lcublas
-
 # Targets
 TARGET = mainCuda
 CUDA_OBJ = minCuda.o

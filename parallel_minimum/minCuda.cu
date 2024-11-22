@@ -6,6 +6,7 @@
 #include <ctime>
 
 #define BLOCK_SIZE 1024
+#define GRID_SIZE 1024
 
 // write a kernel that computes the minimum of an array of integers
 __global__ void findMinFixpointKernel(int *arr, int *size, int *min) {
@@ -13,6 +14,7 @@ __global__ void findMinFixpointKernel(int *arr, int *size, int *min) {
     unsigned int unique_id = blockIdx.x * blockDim.x + threadIdx.x;
     // thread identifier within the block (used to access share memory)
     unsigned int thread_id = threadIdx.x;
+    // declare chunk of shared memory
     __shared__ int minChunk[BLOCK_SIZE];
 
     // load elements into shared memory only if within bounds
@@ -47,6 +49,8 @@ __global__ void findMinKernel(int *arr, int *size, int *min) {
     // perform reduction to find the minimum in the current block
     // this has complexity O(log(n)) where n is the number of elements in the block
     // since the reduction pattern amounts to organizing the elements in a binary tree
+    // the stride is reduced by half at each iteration, and memory accesses are more coalesced
+    // at the later iterations
     for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1) {
         if (thread_id < s) {
             if (minChunk[thread_id] > minChunk[thread_id + s]) {
@@ -110,8 +114,7 @@ void kernel_wrapper(std::vector<int> &arr)
     while(min_value < prev_min_value) {
         // update the previous value
         prev_min_value = min_value;
-        // call the kernel
-        findMinFixpointKernel<<<BLOCK_SIZE, BLOCK_SIZE>>>(d_arr, d_size, d_min);
+        findMinFixpointKernel<<<GRID_SIZE, BLOCK_SIZE>>>(d_arr, d_size, d_min);
         if(cudaGetLastError() != cudaSuccess) {
             printf("Fixpoint kernel Error: %s\n", cudaGetErrorString(err));
         }
@@ -137,7 +140,6 @@ void kernel_wrapper(std::vector<int> &arr)
         printf("Error6: %s\n", cudaGetErrorString(err));
     }
     start = clock();
-    // call the kernel
     findMinKernel<<<BLOCK_SIZE, BLOCK_SIZE>>>(d_arr, d_size, d_min);
     if(cudaGetLastError() != cudaSuccess) {
         printf("Reduction kernel Error: %s\n", cudaGetErrorString(err));
