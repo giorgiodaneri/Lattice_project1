@@ -3,7 +3,8 @@ CXX = g++
 NVCC = nvcc
 
 # Compiler flags specific to the V100 GPU
-CXXFLAGS = -O3 -funroll-loops -march=native
+# add compilation flag for openmp
+CXXFLAGS = -O3 -funroll-loops -march=native -fopenmp
 NVCCFLAGS = -dlto -arch=sm_70 -O3 -use_fast_math -Xptxas -O3 -Xlinker -O3 -Xcompiler -O3
 
 # Targets

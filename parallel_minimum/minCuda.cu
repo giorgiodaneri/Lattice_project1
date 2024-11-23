@@ -4,6 +4,7 @@
 #include <random>
 #include <iostream>
 #include <ctime>
+#include <omp.h>
 
 #define BLOCK_SIZE 1024
 #define GRID_SIZE 1024
@@ -51,6 +52,7 @@ __global__ void findMinKernel(int *arr, int *size, int *min) {
     // since the reduction pattern amounts to organizing the elements in a binary tree
     // the stride is reduced by half at each iteration, and memory accesses are more coalesced
     // at the later iterations
+    # pragma unroll
     for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1) {
         if (thread_id < s) {
             if (minChunk[thread_id] > minChunk[thread_id + s]) {
@@ -77,8 +79,14 @@ void kernel_wrapper(std::vector<int> &arr)
     int prev_min_value = 1001;
     int iters = 0;
     int size = arr.size();
-    // allocate memory on the device
+
+    // measure time
     cudaError_t err;
+    time_t start_mem, end_mem;
+    start_mem = clock();
+    // initialize cuda context
+    cudaFree(0);
+    // allocate memory on the device
     err = cudaMalloc((void **)&d_arr, arr.size() * sizeof(int));
     if(cudaGetLastError() != cudaSuccess) {
         printf("Error0: %s\n", cudaGetErrorString(err));
@@ -104,16 +112,19 @@ void kernel_wrapper(std::vector<int> &arr)
     if(cudaGetLastError() != cudaSuccess) {
         printf("Error5: %s\n", cudaGetErrorString(err));
     }
+    end_mem = clock();
+    double time_taken_mem = double(end_mem - start_mem) / double(CLOCKS_PER_SEC);
+    std::cout << "Time taken for memory allocation: \n" << time_taken_mem << std::endl;
 
     // ----------------- FIXPOINT MODEL ----------------- //
-    // measure time
     time_t start, end;
     start = clock();
-
     // loop until min_value converges to a fixpoint => does not change between iterations
     while(min_value < prev_min_value) {
         // update the previous value
         prev_min_value = min_value;
+        // TODO: SHOULD USE CUDA STREAMS in order to get better performance
+        // TODO: pass the dimension of the shared memory block as a parameter
         findMinFixpointKernel<<<GRID_SIZE, BLOCK_SIZE>>>(d_arr, d_size, d_min);
         if(cudaGetLastError() != cudaSuccess) {
             printf("Fixpoint kernel Error: %s\n", cudaGetErrorString(err));
@@ -125,7 +136,6 @@ void kernel_wrapper(std::vector<int> &arr)
         }
         iters++;
     }
-
     end = clock();
     double time_taken = double(end - start) / double(CLOCKS_PER_SEC);
     std::cout << "Time taken by fixpoint iteration: " << time_taken << std::endl;
@@ -133,6 +143,8 @@ void kernel_wrapper(std::vector<int> &arr)
     printf("Fixpoint computed minimum value is %d\n", min_value);
 
     // ----------------- PARALLEL REDUCTION KERNEL ----------------- //
+    // measure time
+    start = clock();
     // reset min_value
     min_value = 1000;
     err = cudaMemcpy(d_min, &min_value, sizeof(int), cudaMemcpyHostToDevice);
@@ -149,17 +161,17 @@ void kernel_wrapper(std::vector<int> &arr)
     if(cudaGetLastError() != cudaSuccess) {
         printf("Memcpy Error: %s\n", cudaGetErrorString(err));
     }
-    end = clock();
-    time_taken = double(end - start) / double(CLOCKS_PER_SEC);
-    std::cout << "Time taken Cuda: " << time_taken << std::endl;
-    std::cout << "Time taken by parallel reduction: " << time_taken << std::endl;
-    std::cout << "Parallel reduction computed minimum value is " << min_value << std::endl;
 
     // copy the result back to the host
     cudaMemcpy(&min_value, d_min, sizeof(int), cudaMemcpyDeviceToHost);
     cudaFree(d_arr);
     cudaFree(d_min);
     cudaFree(d_size);
+
+    end = clock();
+    time_taken = double(end - start) / double(CLOCKS_PER_SEC);
+    std::cout << "Time taken by parallel reduction: " << time_taken << std::endl;
+    std::cout << "Parallel reduction computed minimum value is " << min_value << std::endl;
 }
 
 // serial CPU function for comparison
@@ -174,7 +186,7 @@ int findMin(std::vector<int> arr) {
 }
 
 int main() {
-    int n = 1000000;
+    int n = 1e9;
     // generate array of random integers of size n
     // Initialize a random number generator
     int min = 2;
@@ -185,11 +197,10 @@ int main() {
     std::uniform_int_distribution<> distrib(min, max);
 
     std::vector<int> arr(n);
-    for (int i = 0; i < n-1; i++) {
+    # pragma omp parallel for
+    for (int i = 0; i < n; i++) {
         arr[i] = distrib(gen);
     }
-    // add artificial minimum 
-    arr[n-1] = -21;
     // allocate memory on the devide
     kernel_wrapper(arr);
 
