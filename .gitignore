@@ -1,6 +1,7 @@
 *.o
 main*
 combinatorialOpt
+check_res.py
 combinatorialOptBFS
 nqueens
 *.txt

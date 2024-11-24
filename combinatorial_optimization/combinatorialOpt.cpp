@@ -2,6 +2,7 @@
 #include <vector>
 #include <chrono>
 #include <algorithm>
+#include <stack>    
 #include "parser.hpp"
 
 // N-Queens node
@@ -43,8 +44,51 @@ bool isValid(const std::vector<int>& positions, const std::vector<std::pair<int,
     return true;
 }
 
+// function to exclude all values that are incompatible with the latest variable assignment
+// and store them in a stack to reinsert them in the domain once backtracking reached depth-1
+void excludeValues(std::vector<std::vector<bool>>& domains, std::stack<std::pair<std::pair<int, int>, int>>& excludedValues, int depth, int newPos, const std::vector<std::pair<int, int>>& constraints) {
+    for (auto& constraint : constraints) {
+        int var1 = constraint.first;
+        int var2 = constraint.second;
 
-void generateAndBranch(const Node& parent, const std::vector<std::pair<int, int>>& constraints, const std::vector<int>& upperBounds, int& numSolutions, int numVariables) {
+        if(var1 < depth && var2 < depth) {
+            continue;
+        }
+        
+        if(var1 == depth && var2 > depth)
+        {
+            // only add value to the stack if it is inside the domain of the other variable
+           // and if it has not been already excluded 
+            if(domains[var2].size() > newPos && domains[var2][newPos]) {
+                // pair is (value, depth), third element is the depth of the variable that has been assigned the value
+                excludedValues.push(std::make_pair(std::make_pair(newPos, depth), var2));
+                // check if the domain of var2 is greater than newPos
+                domains[var2][newPos] = false;
+            }
+        }
+        else if(var2 == depth && var1 > depth)
+        {
+            if(domains[var1].size() > newPos && domains[var1][newPos]) {
+                excludedValues.push(std::make_pair(std::make_pair(newPos, depth), var1));
+                // check if the domain of var1 is greater than newPos
+                domains[var1][newPos] = false;
+            }
+        }
+    }
+}
+
+void reinsertValues(std::vector<std::vector<bool>>& domains, std::stack<std::pair<std::pair<int, int>, int>>& excludedValues, int depth) {
+    while(!excludedValues.empty() && excludedValues.top().second == depth) {
+        std::pair<int, int> value = excludedValues.top().first;
+        int var = excludedValues.top().second;
+        domains[var][value.first] = true;
+        excludedValues.pop();
+        // std::cout << "Reinserted value: " << value.first << " of variable " << var << " excluded by variable " << value.second << std::endl;
+    }
+}
+
+void generateAndBranch(const Node& parent, const std::vector<std::pair<int, int>>& constraints, 
+    const std::vector<int>& upperBounds, std::stack<std::pair<std::pair<int, int>, int>>& excludedValues, std::vector<std::vector<bool>>& domains, int& numSolutions, int numVariables) {
     // reached a leaf node, all constraints are satisfied
     if(parent.depth == (numVariables-1)) {
         numSolutions++;
@@ -56,22 +100,21 @@ void generateAndBranch(const Node& parent, const std::vector<std::pair<int, int>
     }
     else {
         // generate a new node for each possible position of the current variable
-        // compatibly with its upper bound => do not generate nodes that violate it 
-        int len = 0;
-        if(numVariables > upperBounds[parent.depth]) {
-            len = upperBounds[parent.depth];
-        }
-        else {
-            len = numVariables;
-        }
-        for(int i = 0; i < len; i++) {
-            if(isValid(parent.positions, constraints, parent.depth, i)) {
+        // compatibly with its upper bound => do not generate nodes that violate it
+        // iterate over the values in the domain of the current variable 
+        for(int i = 0; i < domains[parent.depth+1].size(); i++) {
+            // if(domains[parent.depth+1][i])
+            if(domains[parent.depth+1][i] && isValid(parent.positions, constraints, parent.depth, i)) {
                 Node child(parent);
                 // place the previous variable at the valid position that has been computed
                 // increase depth and prepare for calculation of the current node possible positions
                 child.depth++;
                 child.positions[child.depth] = i;
-                generateAndBranch(child, constraints, upperBounds, numSolutions, numVariables);
+                excludeValues(domains, excludedValues, child.depth, i, constraints);
+                // check if top element of the stack has the same depth as the current node
+                // if so, reinsert the value in the domain
+                reinsertValues(domains, excludedValues, child.depth);
+                generateAndBranch(child, constraints, upperBounds, excludedValues, domains, numSolutions, numVariables);
             } 
         }
     }
@@ -102,17 +145,6 @@ int main(int argc, char** argv) {
         }
     }
 
-    // remove all duplicate constraints by checking if the first element of the first constraints is equal to
-    // the second element of the second constraint and vice versa
-    for(auto& constraint : constraints) {
-        for(auto& constraint2 : constraints) {
-            if(constraint.first == constraint2.second && constraint.second == constraint2.first) {
-                // remove constraint2
-                
-            }
-        }
-    }
-
     // Remove duplicates
     std::vector<std::pair<int, int>> uniqueConstraints;
     for (auto& constraint : constraints) {
@@ -139,6 +171,22 @@ int main(int argc, char** argv) {
 
     // number of solutions
     int numSolutions = 0;
+    // vector of the domains of the variables, which is a vector of vectors of booleans, each one of size U_i
+    std::vector<std::vector<bool>> domains;
+    for(int i = 0; i < n; i++) {
+        std::vector<bool> domain;
+        for(int j = 0; j <= upperBounds[i]; j++) {
+            domain.push_back(true);
+        }
+        domains.push_back(domain);
+    }
+    
+    // stack to hold the values that have been excluded by the domain of the variables
+    // the structure of each element is a pair (value, depth)
+    // the value will be reinserted in the domain once backtracking reached depth-1
+    // since the corresponding value of the assigned variable, which violated the constraint, will be changed
+    // due to visiting another branch in the tree
+    std::stack<std::pair<std::pair<int, int>, int>> excludedValues;
 
     // create the root node
     Node root(n);
@@ -146,20 +194,30 @@ int main(int argc, char** argv) {
     // unroll first iteration of the recursion, since the dummy root node is already created
     // and all the nodes that correspond to the first variable need not increase depth
     // since they are found at the first level of the tree
-    int len = 0;
-    if(n > upperBounds[0]) {
-        len = upperBounds[0];
-    }
-    else {
-        len = n;
-    }
-    for(int i = 0; i < len; i++) {
+    for(int i = 0; i <= upperBounds[0]; i++) {
         // do not check constraints for the first variable, since all the others have not been initialized yet
         Node child(n);
         // place the previous variable at the valid position that has been computed
         // increase depth and prepare for calculation of the current node possible positions
         child.positions[child.depth] = i;
-        generateAndBranch(child, constraints, upperBounds, numSolutions, n);
+        excludeValues(domains, excludedValues, child.depth, i, constraints);
+        generateAndBranch(child, uniqueConstraints, upperBounds, excludedValues, domains, numSolutions, n);
+    }
+
+    // print excluded values
+    while(!excludedValues.empty()) {
+        std::pair<std::pair<int, int>, int> value = excludedValues.top();
+        std::cout << "Excluded value: " << value.first.first << " of variable " << value.first.second << std::endl;
+        excludedValues.pop();
+    }
+
+    // print the domains
+    for(int i = 0; i < n; i++) {
+        std::cout << "Domain of variable " << i << ": ";
+        for(int j = 0; j <= upperBounds[i]; j++) {
+            std::cout << domains[i][j] << " ";
+        }
+        std::cout << std::endl;
     }
     
     // stop timer
