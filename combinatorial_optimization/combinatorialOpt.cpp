@@ -31,11 +31,13 @@ bool isValid(const std::vector<int>& positions, const std::vector<std::pair<int,
         int var2 = constraint.second;
         
         // print the current constraint
+        // std::cout << "Constraint: " << var1 << " " << var2 << std::endl;
         // Skip constraints that involve variables beyond the current depth
-        if (var2 > depth || var1 > depth) continue;
+        if (var2 > (depth+1) || var1 > (depth+1)) continue;
 
         // Check if this constraint is violated
-        if ((positions[var2] == newPos && var1 == depth) || (positions[var1] == newPos && var2 == depth)) {
+        if ((positions[var2] == newPos && var1 == (depth+1)) || (positions[var1] == newPos && var2 == (depth+1))) {
+                // std::cout << "Violated" << std::endl;
                 return false;
         }
     }
@@ -45,7 +47,7 @@ bool isValid(const std::vector<int>& positions, const std::vector<std::pair<int,
 
 void generateAndBranch(const Node& parent, const std::vector<std::pair<int, int>>& constraints, const std::vector<int>& upperBounds, int& numSolutions, int numVariables) {
     // reached a leaf node, all constraints are satisfied
-    if(parent.depth == (numVariables-1)) {
+    if(parent.depth == (numVariables - 1)) {
         numSolutions++;
         std::cout << "Configuration: ";
             for(int j = 0; j < numVariables; j++) {
@@ -155,13 +157,11 @@ int main(int argc, char** argv) {
         len = n;
     }
     for(int i = 0; i < len; i++) {
-        if(isValid(root.positions, constraints, root.depth, i)) {
-            Node child(n);
-            // place the previous variable at the valid position that has been computed
-            // increase depth and prepare for calculation of the current node possible positions
-            child.positions[child.depth] = i;
-            generateAndBranch(child, constraints, upperBounds, numSolutions, n);
-        }
+        Node child(n);
+        // place the previous variable at the valid position that has been computed
+        // increase depth and prepare for calculation of the current node possible positions
+        child.positions[child.depth] = i;
+        generateAndBranch(child, constraints, upperBounds, numSolutions, n);
     }
     
     // stop timer
