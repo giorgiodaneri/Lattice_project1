@@ -1,6 +1,7 @@
 *.o
 main*
 combinatorialOpt
+combinatorialOptBFS
 nqueens
 *.txt
 .vscode

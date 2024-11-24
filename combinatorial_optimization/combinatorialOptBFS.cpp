@@ -2,6 +2,7 @@
 #include <vector>
 #include <chrono>
 #include <algorithm>
+#include <queue>
 #include "parser.hpp"
 
 // N-Queens node
@@ -44,35 +45,41 @@ bool isValid(const std::vector<int>& positions, const std::vector<std::pair<int,
 }
 
 
-void generateAndBranch(const Node& parent, const std::vector<std::pair<int, int>>& constraints, const std::vector<int>& upperBounds, int& numSolutions, int numVariables) {
-    // reached a leaf node, all constraints are satisfied
-    if(parent.depth == (numVariables-1)) {
-        numSolutions++;
-        // std::cout << "Configuration: ";
-        //     for(int j = 0; j < numVariables; j++) {
-        //         std::cout << parent.positions[j] << " ";
-        //     }
-        // std::cout << std::endl;
-    }
-    else {
-        // generate a new node for each possible position of the current variable
-        // compatibly with its upper bound => do not generate nodes that violate it 
-        int len = 0;
-        if(numVariables > upperBounds[parent.depth]) {
-            len = upperBounds[parent.depth];
+void generateAndBranch(const Node& parent, const std::vector<std::pair<int, int>>& constraints, const std::vector<int>& upperBounds, int& numSolutions, int numVariables, std::queue<Node>& fifo) {
+    // loop until there are nodes in the queue
+    while(!fifo.empty()) {
+        // get the first node in the queue
+        Node parent = fifo.front();
+        fifo.pop();
+        // reached a leaf node, all constraints are satisfied
+        if(parent.depth == (numVariables-1)) {
+            numSolutions++;
+            std::cout << "Configuration: ";
+                for(int j = 0; j < numVariables; j++) {
+                    std::cout << parent.positions[j] << " ";
+                }
+            std::cout << std::endl;
         }
         else {
-            len = numVariables;
-        }
-        for(int i = 0; i < len; i++) {
-            if(isValid(parent.positions, constraints, parent.depth, i)) {
-                Node child(parent);
-                // place the previous variable at the valid position that has been computed
-                // increase depth and prepare for calculation of the current node possible positions
-                child.depth++;
-                child.positions[child.depth] = i;
-                generateAndBranch(child, constraints, upperBounds, numSolutions, numVariables);
-            } 
+            // generate a new node for each possible position of the current variable
+            // compatibly with its upper bound => do not generate nodes that violate it 
+            int len = 0;
+            if(numVariables > upperBounds[parent.depth+1]) {
+                len = upperBounds[parent.depth+1];
+            }
+            else {
+                len = numVariables;
+            }
+            for(int i = 0; i < len; i++) {
+                if(isValid(parent.positions, constraints, parent.depth, i)) {
+                    Node child(parent);
+                    // place the previous variable at the valid position that has been computed
+                    // increase depth and prepare for calculation of the current node possible positions
+                    child.depth++;
+                    child.positions[child.depth] = i;
+                    fifo.push(child);
+                } 
+            }
         }
     }
 }
@@ -140,6 +147,9 @@ int main(int argc, char** argv) {
     // number of solutions
     int numSolutions = 0;
 
+    // declare a fifo queue
+    std::queue<Node> fifo;
+
     // create the root node
     Node root(n);
 
@@ -159,7 +169,8 @@ int main(int argc, char** argv) {
         // place the previous variable at the valid position that has been computed
         // increase depth and prepare for calculation of the current node possible positions
         child.positions[child.depth] = i;
-        generateAndBranch(child, constraints, upperBounds, numSolutions, n);
+        fifo.push(child);
+        generateAndBranch(child, constraints, upperBounds, numSolutions, n, fifo);
     }
     
     // stop timer
