@@ -1,4 +1,7 @@
 *.o
 main*
+combinatorialOpt
+nqueens
+*.txt
 .vscode
 combinatorial_optimization/nqueens

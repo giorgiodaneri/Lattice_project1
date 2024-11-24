@@ -8,7 +8,7 @@
 
 class Data{
     private:
-        size_t n = NULL;
+        size_t n = 0;
         int* u;
         int** C;
     public:
@@ -83,21 +83,21 @@ class Data{
         }
 
         void print_n(){
-            assert(n != NULL && "[ERROR] Haven't read input file yet");
+            assert(n != 0 && "[ERROR] Haven't read input file yet");
             
             printf("n = %ld\n", n);
             return;
         }
 
         void print_u(){
-            assert(n != NULL && "[ERROR] Haven't read input file yet");
+            assert(n != 0 && "[ERROR] Haven't read input file yet");
             
             for (size_t i = 0; i < n; ++i)printf("u[%ld] = %d\n", i, u[i]);
             return;
         }
 
         void print_C(){
-            assert(n != NULL && "[ERROR] Haven't read input file yet");
+            assert(n != 0 && "[ERROR] Haven't read input file yet");
 
             for (size_t i = 0; i < n; ++i)
                 for (size_t j = 0; j < n; ++j)

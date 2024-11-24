@@ -1,12 +1,19 @@
 import random
+import numpy as np
 
 def generate_instance(n: int):
-    random.seed(0)
+    random.seed(43)
     # U
     U:list = [random.randint(0,100)for _ in range(n)]
     # C
-    C:list = [[random.randint(0,1)for _ in range(n)]for _ in range(n)]
-    
+    C = np.zeros((n,n), dtype=int)
+    for i in range(n):
+        for j in range(i, n, 1):
+            C[i][j] = random.randint(0,1)
+            C[j][i] = C[i][j]
+            if i == j:
+                C[i][j] = 0
+
     with open(f"pco_{n}.txt", "+w") as f:
         f.write("N\n")
         f.write(f"{n}\n")
@@ -22,4 +29,4 @@ def generate_instance(n: int):
 
 
 if __name__ == '__main__':
-    generate_instance(3)
+    generate_instance(5)

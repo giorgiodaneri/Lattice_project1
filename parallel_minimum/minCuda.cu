@@ -80,7 +80,7 @@ void kernel_wrapper(std::vector<int> &arr)
     int iters = 0;
     int size = arr.size();
 
-    // measure time
+    // measure time for memory allocation and data transfer
     cudaError_t err;
     time_t start_mem, end_mem;
     start_mem = clock();
@@ -123,8 +123,6 @@ void kernel_wrapper(std::vector<int> &arr)
     while(min_value < prev_min_value) {
         // update the previous value
         prev_min_value = min_value;
-        // TODO: SHOULD USE CUDA STREAMS in order to get better performance
-        // TODO: pass the dimension of the shared memory block as a parameter
         findMinFixpointKernel<<<GRID_SIZE, BLOCK_SIZE>>>(d_arr, d_size, d_min);
         if(cudaGetLastError() != cudaSuccess) {
             printf("Fixpoint kernel Error: %s\n", cudaGetErrorString(err));
@@ -151,7 +149,6 @@ void kernel_wrapper(std::vector<int> &arr)
     if(cudaGetLastError() != cudaSuccess) {
         printf("Error6: %s\n", cudaGetErrorString(err));
     }
-    start = clock();
     findMinKernel<<<BLOCK_SIZE, BLOCK_SIZE>>>(d_arr, d_size, d_min);
     if(cudaGetLastError() != cudaSuccess) {
         printf("Reduction kernel Error: %s\n", cudaGetErrorString(err));
@@ -161,6 +158,8 @@ void kernel_wrapper(std::vector<int> &arr)
     if(cudaGetLastError() != cudaSuccess) {
         printf("Memcpy Error: %s\n", cudaGetErrorString(err));
     }
+    end = clock();
+    time_taken = double(end - start) / double(CLOCKS_PER_SEC);
 
     // copy the result back to the host
     cudaMemcpy(&min_value, d_min, sizeof(int), cudaMemcpyDeviceToHost);
@@ -168,8 +167,6 @@ void kernel_wrapper(std::vector<int> &arr)
     cudaFree(d_min);
     cudaFree(d_size);
 
-    end = clock();
-    time_taken = double(end - start) / double(CLOCKS_PER_SEC);
     std::cout << "Time taken by parallel reduction: " << time_taken << std::endl;
     std::cout << "Parallel reduction computed minimum value is " << min_value << std::endl;
 }
@@ -185,8 +182,14 @@ int findMin(std::vector<int> arr) {
     return min;
 }
 
-int main() {
-    int n = 1e9;
+int main(int argc, char **argv) {
+    // read the size of the array from the command line
+    if (argc != 2) {
+        std::cout << "usage: " << argv[0] << " <input dimension> " << std::endl;
+        exit(1);
+    }
+    int n = atoi(argv[1]);
+
     // generate array of random integers of size n
     // Initialize a random number generator
     int min = 2;
@@ -195,8 +198,15 @@ int main() {
     std::random_device rd;
     std::mt19937 gen(rd());
     std::uniform_int_distribution<> distrib(min, max);
-
     std::vector<int> arr(n);
+    
+    // if openmp is enabled, set the number of threads
+    # ifdef _OPENMP
+    omp_set_num_threads(32);
+    // print number of active omp threads
+    std::cout << "Number of active threads: " << omp_get_max_threads() << std::endl;
+    # endif
+
     # pragma omp parallel for
     for (int i = 0; i < n; i++) {
         arr[i] = distrib(gen);
