@@ -32,11 +32,10 @@ bool isValid(const std::vector<int>& positions, const std::vector<std::pair<int,
         
         // print the current constraint
         // Skip constraints that involve variables beyond the current depth
-        if (var1 > depth+1 || var2 > depth+1) continue;
+        if (var2 > depth || var1 > depth) continue;
 
         // Check if this constraint is violated
-        if ((var2 <= depth && positions[var2] == newPos) || 
-            (var1 <= depth && positions[var1] == newPos)) {
+        if ((positions[var2] == newPos && var1 == depth) || (positions[var1] == newPos && var2 == depth)) {
                 return false;
         }
     }
@@ -48,11 +47,11 @@ void generateAndBranch(const Node& parent, const std::vector<std::pair<int, int>
     // reached a leaf node, all constraints are satisfied
     if(parent.depth == (numVariables-1)) {
         numSolutions++;
-        // std::cout << "Configuration: ";
-        //     for(int j = 0; j < numVariables; j++) {
-        //         std::cout << parent.positions[j] << " ";
-        //     }
-        // std::cout << std::endl;
+        std::cout << "Configuration: ";
+            for(int j = 0; j < numVariables; j++) {
+                std::cout << parent.positions[j] << " ";
+            }
+        std::cout << std::endl;
     }
     else {
         // generate a new node for each possible position of the current variable
@@ -94,7 +93,6 @@ int main(int argc, char** argv) {
     upperBounds.resize(n);
 
     // Get the constraints
-
     for (size_t i = 0; i < n; ++i) {
         for (size_t j = 0; j < n; ++j) {
             if (parser.get_C_at(i, j) == 1) {
@@ -102,6 +100,38 @@ int main(int argc, char** argv) {
             }
         }
     }
+
+    // remove all duplicate constraints by checking if the first element of the first constraints is equal to
+    // the second element of the second constraint and vice versa
+    for(auto& constraint : constraints) {
+        for(auto& constraint2 : constraints) {
+            if(constraint.first == constraint2.second && constraint.second == constraint2.first) {
+                // remove constraint2
+                
+            }
+        }
+    }
+
+    // Remove duplicates
+    std::vector<std::pair<int, int>> uniqueConstraints;
+    for (auto& constraint : constraints) {
+        bool isDuplicate = false;
+        for (auto& unique : uniqueConstraints) {
+            if ((constraint.first == unique.second && constraint.second == unique.first) ||
+                (constraint.first == unique.first && constraint.second == unique.second)) {
+                isDuplicate = true;
+                break;
+            }
+        }
+        if (!isDuplicate) {
+            uniqueConstraints.push_back(constraint);
+        }
+    }
+
+    // print them
+    // for (auto& constraint : uniqueConstraints) {
+    //     std::cout << constraint.first << " " << constraint.second << std::endl;
+    // }
 
     // Get the upper bounds
     for (size_t i = 0; i < n; ++i) {
