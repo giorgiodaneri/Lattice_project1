@@ -73,7 +73,6 @@ void excludeValues(std::vector<std::vector<bool>>& domains, std::stack<std::pair
                 excludedValues.push(std::make_pair(std::make_pair(newPos, depth), var1));
                 // check if the domain of var1 is greater than newPos
                 domains[var1][newPos] = false;
-                std::cout << "Excluded value: " << newPos << " of variable " << var1 << " from variable " << var2 << std::endl;
             }
         }
     }
@@ -85,9 +84,6 @@ void reinsertValues(std::vector<std::vector<bool>>& domains, std::stack<std::pai
         int var = excludedValues.top().second;
         domains[var][value.first] = true;
         excludedValues.pop();
-        if(depth == 0) {
-            std::cout << "Reinserted value: " << value.first << " of variable " << var << std::endl;
-        }
     }
 }
 
@@ -205,9 +201,8 @@ int main(int argc, char** argv) {
         // increase depth and prepare for calculation of the current node possible positions
         child.positions[child.depth] = i;
         excludeValues(domains, excludedValues, child.depth, i, constraints);
-        reinsertValues(domains, excludedValues, child.depth);
-        std::cout << "Returned at depth 0 with value " << i << std::endl;
         generateAndBranch(child, uniqueConstraints, upperBounds, excludedValues, domains, numSolutions, n);
+        reinsertValues(domains, excludedValues, child.depth);
     }
 
     // print excluded values
@@ -218,13 +213,13 @@ int main(int argc, char** argv) {
     // }
 
     // print the domains
-    for(int i = 0; i < n; i++) {
-        std::cout << "Domain of variable " << i << ": ";
-        for(int j = 0; j <= upperBounds[i]; j++) {
-            std::cout << domains[i][j] << " ";
-        }
-        std::cout << std::endl;
-    }
+    // for(int i = 0; i < n; i++) {
+    //     std::cout << "Domain of variable " << i << ": ";
+    //     for(int j = 0; j <= upperBounds[i]; j++) {
+    //         std::cout << domains[i][j] << " ";
+    //     }
+    //     std::cout << std::endl;
+    // }
     
     // stop timer
     auto end = std::chrono::high_resolution_clock::now();
