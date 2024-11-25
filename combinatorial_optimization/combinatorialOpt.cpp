@@ -5,10 +5,11 @@
 #include <stack>    
 #include "parser.hpp"
 
-// N-Queens node
+// Node
 struct Node {
     int  depth = 0;
-    std::vector<int> positions; // positions  configuration (permutation)
+    // positions  configuration (permutation)
+    std::vector<int> positions; 
 
     Node(int  N): positions (N) {
         for (int i = 0; i < N; ++i) {
@@ -23,6 +24,17 @@ struct Node {
     Node(const Node&) = default;
     Node(Node&&) = default;
     Node() = default;
+};
+
+struct removedVal {
+    int value;
+    int depth;
+    int var;
+
+    removedVal() = default;
+    removedVal(const removedVal&) = default;
+    removedVal(removedVal&&) = default;
+    removedVal(int val, int d, int v): value(val), depth(d), var(v) {}
 };
 
 bool isValid(const std::vector<int>& positions, const std::vector<std::pair<int, int>>& constraints, int depth, int newPos) {
@@ -46,7 +58,7 @@ bool isValid(const std::vector<int>& positions, const std::vector<std::pair<int,
 
 // function to exclude all values that are incompatible with the latest variable assignment
 // and store them in a stack to reinsert them in the domain once backtracking reached depth-1
-void excludeValues(std::vector<std::vector<bool>>& domains, std::stack<std::pair<std::pair<int, int>, int>>& excludedValues, int depth, int newPos, const std::vector<std::pair<int, int>>& constraints) {
+void excludeValues(std::vector<std::vector<bool>>& domains, std::vector<removedVal>& excludedValues, int depth, int newPos, const std::vector<std::pair<int, int>>& constraints) {
     for (auto& constraint : constraints) {
         int var1 = constraint.first;
         int var2 = constraint.second;
@@ -61,7 +73,8 @@ void excludeValues(std::vector<std::vector<bool>>& domains, std::stack<std::pair
            // and if it has not been already excluded 
             if(domains[var2].size() > newPos && domains[var2][newPos]) {
                 // pair is (value, depth), third element is the depth of the variable that has been assigned the value
-                excludedValues.push(std::make_pair(std::make_pair(newPos, depth), var2));
+                removedVal val(newPos, depth, var2);
+                excludedValues.push_back(val);
                 // check if the domain of var2 is greater than newPos
                 domains[var2][newPos] = false;
                 // std::cout << "Excluded value: " << newPos << " of variable " << var1 << " from variable " << var2 << std::endl;
@@ -70,7 +83,9 @@ void excludeValues(std::vector<std::vector<bool>>& domains, std::stack<std::pair
         else if(var2 == depth && var1 > depth)
         {
             if(domains[var1].size() > newPos && domains[var1][newPos]) {
-                excludedValues.push(std::make_pair(std::make_pair(newPos, depth), var1));
+                // create a new removedVal struct and push it to the array of structs
+                removedVal val(newPos, depth, var1);
+                excludedValues.push_back(val);
                 // check if the domain of var1 is greater than newPos
                 domains[var1][newPos] = false;
             }
@@ -78,17 +93,23 @@ void excludeValues(std::vector<std::vector<bool>>& domains, std::stack<std::pair
     }
 }
 
-void reinsertValues(std::vector<std::vector<bool>>& domains, std::stack<std::pair<std::pair<int, int>, int>>& excludedValues, int depth) {
-    while(!excludedValues.empty() && excludedValues.top().second == depth) {
-        std::pair<int, int> value = excludedValues.top().first;
-        int var = excludedValues.top().second;
-        domains[var][value.first] = true;
-        excludedValues.pop();
+void reinsertValues(std::vector<std::vector<bool>>& domains, std::vector<removedVal>& excludedValues, int depth) {
+    // while(!excludedValues.empty() && excludedValues.top().second == depth) {
+    //     std::pair<int, int> value = excludedValues.top().first;
+    //     int var = excludedValues.top().second;
+    //     domains[var][value.first] = true;
+    //     excludedValues.pop();
+    // }
+    while(!excludedValues.empty() && excludedValues.back().depth == depth) {
+        int value = excludedValues.back().value;
+        int var = excludedValues.back().var;
+        domains[var][value] = true;
+        excludedValues.pop_back();
     }
 }
 
 void generateAndBranch(const Node& parent, const std::vector<std::pair<int, int>>& constraints, 
-    const std::vector<int>& upperBounds, std::stack<std::pair<std::pair<int, int>, int>>& excludedValues, std::vector<std::vector<bool>>& domains, int& numSolutions, int numVariables) {
+    const std::vector<int>& upperBounds, std::vector<removedVal>& excludedValues, std::vector<std::vector<bool>>& domains, int& numSolutions, int numVariables) {
     // reached a leaf node, all constraints are satisfied
     if(parent.depth == (numVariables-1)) {
         numSolutions++;
@@ -166,8 +187,6 @@ int main(int argc, char** argv) {
         upperBounds[i] = parser.get_u_at(i);
     }
 
-    // start timer
-    auto start = std::chrono::high_resolution_clock::now();
 
     // number of solutions
     int numSolutions = 0;
@@ -186,10 +205,13 @@ int main(int argc, char** argv) {
     // the value will be reinserted in the domain once backtracking reached depth-1
     // since the corresponding value of the assigned variable, which violated the constraint, will be changed
     // due to visiting another branch in the tree
-    std::stack<std::pair<std::pair<int, int>, int>> excludedValues;
+    // std::stack<std::pair<std::pair<int, int>, int>> excludedValues;
+    
+    // use an array of structs to store the excluded values
+    std::vector<removedVal> excludedValues;
 
-    // create the root node
-    // Node root(n);
+    // start timer
+    auto start = std::chrono::high_resolution_clock::now();
 
     // unroll first iteration of the recursion, since the dummy root node is already created
     // and all the nodes that correspond to the first variable need not increase depth
@@ -205,6 +227,10 @@ int main(int argc, char** argv) {
         reinsertValues(domains, excludedValues, child.depth);
     }
 
+    // stop timer
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> diff = end-start;
+    
     // print excluded values
     // while(!excludedValues.empty()) {
     //     std::pair<std::pair<int, int>, int> value = excludedValues.top();
@@ -220,10 +246,6 @@ int main(int argc, char** argv) {
     //     }
     //     std::cout << std::endl;
     // }
-    
-    // stop timer
-    auto end = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double> diff = end-start;
 
     // print the number of solutions
     std::cout << "Number of solutions: " << numSolutions << std::endl;
