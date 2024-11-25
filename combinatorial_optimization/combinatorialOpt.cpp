@@ -64,6 +64,7 @@ void excludeValues(std::vector<std::vector<bool>>& domains, std::stack<std::pair
                 excludedValues.push(std::make_pair(std::make_pair(newPos, depth), var2));
                 // check if the domain of var2 is greater than newPos
                 domains[var2][newPos] = false;
+                // std::cout << "Excluded value: " << newPos << " of variable " << var1 << " from variable " << var2 << std::endl;
             }
         }
         else if(var2 == depth && var1 > depth)
@@ -72,6 +73,7 @@ void excludeValues(std::vector<std::vector<bool>>& domains, std::stack<std::pair
                 excludedValues.push(std::make_pair(std::make_pair(newPos, depth), var1));
                 // check if the domain of var1 is greater than newPos
                 domains[var1][newPos] = false;
+                std::cout << "Excluded value: " << newPos << " of variable " << var1 << " from variable " << var2 << std::endl;
             }
         }
     }
@@ -83,7 +85,9 @@ void reinsertValues(std::vector<std::vector<bool>>& domains, std::stack<std::pai
         int var = excludedValues.top().second;
         domains[var][value.first] = true;
         excludedValues.pop();
-        // std::cout << "Reinserted value: " << value.first << " of variable " << var << " excluded by variable " << value.second << std::endl;
+        if(depth == 0) {
+            std::cout << "Reinserted value: " << value.first << " of variable " << var << std::endl;
+        }
     }
 }
 
@@ -113,8 +117,8 @@ void generateAndBranch(const Node& parent, const std::vector<std::pair<int, int>
                 excludeValues(domains, excludedValues, child.depth, i, constraints);
                 // check if top element of the stack has the same depth as the current node
                 // if so, reinsert the value in the domain
-                reinsertValues(domains, excludedValues, child.depth);
                 generateAndBranch(child, constraints, upperBounds, excludedValues, domains, numSolutions, numVariables);
+                reinsertValues(domains, excludedValues, child.depth);
             } 
         }
     }
@@ -189,7 +193,7 @@ int main(int argc, char** argv) {
     std::stack<std::pair<std::pair<int, int>, int>> excludedValues;
 
     // create the root node
-    Node root(n);
+    // Node root(n);
 
     // unroll first iteration of the recursion, since the dummy root node is already created
     // and all the nodes that correspond to the first variable need not increase depth
@@ -201,15 +205,17 @@ int main(int argc, char** argv) {
         // increase depth and prepare for calculation of the current node possible positions
         child.positions[child.depth] = i;
         excludeValues(domains, excludedValues, child.depth, i, constraints);
+        reinsertValues(domains, excludedValues, child.depth);
+        std::cout << "Returned at depth 0 with value " << i << std::endl;
         generateAndBranch(child, uniqueConstraints, upperBounds, excludedValues, domains, numSolutions, n);
     }
 
     // print excluded values
-    while(!excludedValues.empty()) {
-        std::pair<std::pair<int, int>, int> value = excludedValues.top();
-        std::cout << "Excluded value: " << value.first.first << " of variable " << value.first.second << std::endl;
-        excludedValues.pop();
-    }
+    // while(!excludedValues.empty()) {
+    //     std::pair<std::pair<int, int>, int> value = excludedValues.top();
+    //     std::cout << "Excluded value: " << value.first.first << " of variable " << value.second << " from variable " << value.first.second << std::endl;
+    //     excludedValues.pop();
+    // }
 
     // print the domains
     for(int i = 0; i < n; i++) {
