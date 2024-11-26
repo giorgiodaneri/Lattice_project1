@@ -7,3 +7,4 @@ nqueens
 *.txt
 .vscode
 combinatorial_optimization/nqueens
+combinatorial_optimization/job.sh

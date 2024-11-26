@@ -77,7 +77,6 @@ void excludeValues(std::vector<std::vector<bool>>& domains, std::vector<removedV
                 excludedValues.push_back(val);
                 // check if the domain of var2 is greater than newPos
                 domains[var2][newPos] = false;
-                // std::cout << "Excluded value: " << newPos << " of variable " << var1 << " from variable " << var2 << std::endl;
             }
         }
         else if(var2 == depth && var1 > depth)
@@ -94,12 +93,6 @@ void excludeValues(std::vector<std::vector<bool>>& domains, std::vector<removedV
 }
 
 void reinsertValues(std::vector<std::vector<bool>>& domains, std::vector<removedVal>& excludedValues, int depth) {
-    // while(!excludedValues.empty() && excludedValues.top().second == depth) {
-    //     std::pair<int, int> value = excludedValues.top().first;
-    //     int var = excludedValues.top().second;
-    //     domains[var][value.first] = true;
-    //     excludedValues.pop();
-    // }
     while(!excludedValues.empty() && excludedValues.back().depth == depth) {
         int value = excludedValues.back().value;
         int var = excludedValues.back().var;
@@ -200,14 +193,10 @@ int main(int argc, char** argv) {
         domains.push_back(domain);
     }
     
-    // stack to hold the values that have been excluded by the domain of the variables
-    // the structure of each element is a pair (value, depth)
+    // use an array of structs to store the excluded values
     // the value will be reinserted in the domain once backtracking reached depth-1
     // since the corresponding value of the assigned variable, which violated the constraint, will be changed
     // due to visiting another branch in the tree
-    // std::stack<std::pair<std::pair<int, int>, int>> excludedValues;
-    
-    // use an array of structs to store the excluded values
     std::vector<removedVal> excludedValues;
 
     // start timer
@@ -222,7 +211,7 @@ int main(int argc, char** argv) {
         // place the previous variable at the valid position that has been computed
         // increase depth and prepare for calculation of the current node possible positions
         child.positions[child.depth] = i;
-        excludeValues(domains, excludedValues, child.depth, i, constraints);
+        excludeValues(domains, excludedValues, child.depth, i, uniqueConstraints);
         generateAndBranch(child, uniqueConstraints, upperBounds, excludedValues, domains, numSolutions, n);
         reinsertValues(domains, excludedValues, child.depth);
     }
