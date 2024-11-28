@@ -98,6 +98,7 @@ void reinsertValues(std::vector<std::vector<bool>>& domains, std::vector<removed
         int var = excludedValues.back().var;
         domains[var][value] = true;
         excludedValues.pop_back();
+        // std::cout << "Reinserted value: " << value << " of variable " << var << " at depth " << depth << std::endl;
     }
 }
 
@@ -211,6 +212,8 @@ int main(int argc, char** argv) {
         // place the previous variable at the valid position that has been computed
         // increase depth and prepare for calculation of the current node possible positions
         child.positions[child.depth] = i;
+        // print current iter
+        std::cout << "Current iter: " << i << std::endl;
         excludeValues(domains, excludedValues, child.depth, i, uniqueConstraints);
         generateAndBranch(child, uniqueConstraints, upperBounds, excludedValues, domains, numSolutions, n);
         reinsertValues(domains, excludedValues, child.depth);

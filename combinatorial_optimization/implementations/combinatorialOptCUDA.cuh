@@ -38,7 +38,7 @@ struct removedVal {
 };
 
 // kernel to exclude values from the domain of the variables
-__global__ void excludeValuesKernel(char* domains, int* domainSizes, removedVal* excludedValues, int* excludedCount,
+__global__ void excludeValuesKernel(char* domains, int* offsets, removedVal* excludedValues, int* excludedCount,
                                     int* d_depth, int* d_newPos, const std::pair<int, int>* constraints, int numConstraints, int numVariables) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int depth = *d_depth;
@@ -60,31 +60,31 @@ __global__ void excludeValuesKernel(char* domains, int* domainSizes, removedVal*
         int affectedVar = var2;
 
         // Check if value is in the domain of the affected variable
-        if (domainSizes[affectedVar] > newPos && domains[affectedVar * numVariables + newPos] == 1) {
+        if (offsets[affectedVar] > newPos && domains[offsets[affectedVar] + newPos] == 1) {
             // Exclude the value
-            domains[affectedVar * numVariables + newPos] = false;
+            domains[offsets[affectedVar] + newPos] = false;
 
             // Add to excludedValues (atomic operation)
             int pos = atomicAdd(&localCount, 1);
-            excludedValues[pos] = removedVal(newPos, depth, affectedVar);
+            excludedValues[pos+*excludedCount] = removedVal(newPos, depth, affectedVar);
         }
     } else if ((var2 == depth && var1 > depth))
     {
         int affectedVar = var1;
 
         // Check if value is in the domain of the affected variable
-        if (domainSizes[affectedVar] > newPos && domains[affectedVar * numVariables + newPos] == 1) {
+        if (offsets[affectedVar] > newPos && domains[offsets[affectedVar] + newPos] == 1) {
             // Exclude the value
-            domains[affectedVar * numVariables + newPos] = false;
+            domains[offsets[affectedVar] + newPos] = false;
 
             // Add to excludedValues (atomic operation)
             int pos = atomicAdd(&localCount, 1);
-            excludedValues[pos] = removedVal(newPos, depth, affectedVar);
+            excludedValues[pos+*excludedCount] = removedVal(newPos, depth, affectedVar);
         }
     }
     __syncthreads();
 
-    // if (threadIdx.x == 0) atomicAdd(excludedCount, localCount);
+    if (threadIdx.x == 0) atomicAdd(excludedCount, localCount);
 }
 
 
@@ -109,7 +109,7 @@ bool isValid(const std::vector<int>& positions, const std::vector<std::pair<int,
 
 // function to exclude all values that are incompatible with the latest variable assignment
 // and store them in a stack to reinsert them in the domain once backtracking reached depth-1
-void excludeValues(std::vector<std::vector<bool>>& domains, std::vector<removedVal>& excludedValues, int depth, int newPos, const std::vector<std::pair<int, int>>& constraints) {
+void excludeValues(std::vector<std::vector<char>>& domains, std::vector<removedVal>& excludedValues, int depth, int newPos, const std::vector<std::pair<int, int>>& constraints) {
     for (auto& constraint : constraints) {
         int var1 = constraint.first;
         int var2 = constraint.second;
@@ -143,17 +143,22 @@ void excludeValues(std::vector<std::vector<bool>>& domains, std::vector<removedV
     }
 }
 
-void reinsertValues(std::vector<std::vector<bool>>& domains, std::vector<removedVal>& excludedValues, int depth) {
+void reinsertValues(std::vector<std::vector<char>>& domains, std::vector<removedVal>& excludedValues, int depth) {
     while(!excludedValues.empty() && excludedValues.back().depth == depth) {
         int value = excludedValues.back().value;
         int var = excludedValues.back().var;
         domains[var][value] = true;
         excludedValues.pop_back();
+        std::cout << "Reinserted value: " << value << " of variable " << var << " at depth " << depth << std::endl;
+        if(depth == 0)
+        {
+            std::cout << "Excluded value depth: " << excludedValues.back().depth << std::endl;
+        }
     }
 }
 
 void generateAndBranch(const Node& parent, const std::vector<std::pair<int, int>>& constraints, 
-    const std::vector<int>& upperBounds, std::vector<removedVal>& excludedValues, std::vector<std::vector<bool>>& domains, int& numSolutions, int numVariables) {
+    const std::vector<int>& upperBounds, std::vector<removedVal>& excludedValues, std::vector<std::vector<char>>& domains, int& numSolutions, int numVariables) {
     // reached a leaf node, all constraints are satisfied
     if(parent.depth == (numVariables-1)) {
         numSolutions++;
@@ -185,84 +190,60 @@ void generateAndBranch(const Node& parent, const std::vector<std::pair<int, int>
     }
 }
 
-void checkCudaError(cudaError_t err) {
+void checkCudaError(cudaError_t err, const char* file, int line) {
     if(err != cudaSuccess) {
-        std::cerr << "CUDA error in file '" << __FILE__ << "' in line " << __LINE__ << ": " << cudaGetErrorString(err) << std::endl;
+        std::cerr << "CUDA error in file '" << file << "' in line " << line << ": " << cudaGetErrorString(err) << std::endl;
         exit(EXIT_FAILURE);
     }
 }
 
-void kernel_wrapper(std::vector<std::vector<bool>>& domains, const std::vector<std::pair<int, int>>& constraints, const std::vector<int>& upperBounds, int& numSolutions)
+void kernel_wrapper(std::vector<std::vector<char>>& domains, const std::vector<std::pair<int, int>>& constraints, const std::vector<int>& upperBounds, int& numSolutions)
 {
     int numVariables = domains.size();
     int numConstraints = constraints.size();
-    int maxDomainSize = domains[0].size();
-    for(int i = 1; i < numVariables; i++) {
-        if(domains[i].size() > maxDomainSize) {
-            maxDomainSize = domains[i].size();
-        }
-    }
     cudaError_t err;
     // use an array of structs to store the excluded values
     // the value will be reinserted in the domain once backtracking reached depth-1
     // since the corresponding value of the assigned variable, which violated the constraint, will be changed
     // due to visiting another branch in the tree
     std::vector<removedVal> excludedValues;
+    int excludedCount = -1;
 
-    // Flatten domains for device
-    std::vector<char> flatDomains(numVariables * maxDomainSize, 0);
-    std::vector<int> domainSizes(numVariables, 0);
-    for(int i = 0; i < numVariables; i++) {
-        domainSizes[i] = domains[i].size();
-        for(int j = 0; j < domains[i].size(); j++) {
-            flatDomains[i * maxDomainSize + j] = domains[i][j];
-        }
+
+    // Flatten domains and prepare offsets
+    std::vector<char> flatDomains;
+    std::vector<int> offsets;
+    int currentOffset = 0;
+
+    for (const auto& domain : domains) {
+        offsets.push_back(currentOffset);
+        flatDomains.insert(flatDomains.end(), domain.begin(), domain.end());
+        currentOffset += domain.size();
     }
+    offsets.push_back(currentOffset);
 
     // Allocate device memory
     char* d_domains;
-    int* d_domainSizes;
+    int* d_offsets;
     int* d_depth;
     int* d_newPos;
     removedVal* d_excludedValues;
     int* d_excludedCount;
     std::pair<int, int>* d_constraints;
 
-    err = cudaMalloc(&d_domains, sizeof(char) * flatDomains.size());
-    checkCudaError(err);
-    err = cudaMalloc(&d_domainSizes, sizeof(int) * domainSizes.size());
-    checkCudaError(err);
-    err = cudaMalloc(&d_depth, sizeof(int));
-    checkCudaError(err);
-    err = cudaMalloc(&d_newPos, sizeof(int));
-    checkCudaError(err);
-    err = cudaMalloc(&d_excludedValues, sizeof(removedVal) * excludedValues.size());
-    checkCudaError(err);
-    err = cudaMalloc(&d_excludedCount, sizeof(int));
-    checkCudaError(err);
-    err = cudaMalloc(&d_constraints, sizeof(std::pair<int, int>) * constraints.size());
-    checkCudaError(err);
-
+    err = cudaMalloc(&d_domains, sizeof(char) * flatDomains.size()); checkCudaError(err, __FILE__, __LINE__);    
+    err = cudaMalloc(&d_offsets, sizeof(int) * offsets.size()); checkCudaError(err, __FILE__, __LINE__);
+    err = cudaMalloc(&d_depth, sizeof(int)); checkCudaError(err, __FILE__, __LINE__);
+    err = cudaMalloc(&d_newPos, sizeof(int)); checkCudaError(err, __FILE__, __LINE__);
+    err = cudaMalloc(&d_excludedValues, sizeof(removedVal) * flatDomains.size()); checkCudaError(err, __FILE__, __LINE__);
+    err = cudaMalloc(&d_excludedCount, sizeof(int)); checkCudaError(err, __FILE__, __LINE__);
+    err = cudaMalloc(&d_constraints, sizeof(std::pair<int, int>) * constraints.size()); checkCudaError(err, __FILE__, __LINE__);
     // Copy data to device
-    err = cudaMemcpy(d_domains, flatDomains.data(), sizeof(char) * flatDomains.size(), cudaMemcpyHostToDevice);
-    checkCudaError(err);
-    err = cudaMemcpy(d_domainSizes, domainSizes.data(), sizeof(int) * domainSizes.size(), cudaMemcpyHostToDevice);
-    checkCudaError(err);
-    err = cudaMemcpy(d_constraints, constraints.data(), sizeof(std::pair<int, int>) * constraints.size(), cudaMemcpyHostToDevice);
-    checkCudaError(err);
-    err = cudaMemset(d_excludedCount, 0, sizeof(int));
-    checkCudaError(err);
-
-    // Reconstruct domains from flatDomains
-    for (int i = 0; i < numVariables; i++) {
-    // Resize domains[i] to match domainSizes[i]
-    domains[i].resize(domainSizes[i]);
-
-        for (int j = 0; j < domainSizes[i]; j++) {
-            // Assign value from flatDomains to domains
-            domains[i][j] = flatDomains[i * maxDomainSize + j];
-        }
-    }   
+    err = cudaMemcpy(d_domains, flatDomains.data(), sizeof(char) * flatDomains.size(), cudaMemcpyHostToDevice); checkCudaError(err, __FILE__, __LINE__);
+    err = cudaMemcpy(d_offsets, offsets.data(), sizeof(int) * offsets.size(), cudaMemcpyHostToDevice); checkCudaError(err, __FILE__, __LINE__);
+    err = cudaMemcpy(d_constraints, constraints.data(), sizeof(std::pair<int, int>) * constraints.size(), cudaMemcpyHostToDevice); checkCudaError(err, __FILE__, __LINE__);
+    err = cudaMemset(d_excludedCount, 0, sizeof(int)); checkCudaError(err, __FILE__, __LINE__);
+  
     // unroll first iteration of the recursion, since the dummy root node is already created
     // and all the nodes that correspond to the first variable need not increase depth
     // since they are found at the first level of the tree
@@ -272,39 +253,69 @@ void kernel_wrapper(std::vector<std::vector<bool>>& domains, const std::vector<s
         // place the previous variable at the valid position that has been computed
         // increase depth and prepare for calculation of the current node possible positions
         child.positions[child.depth] = i;
-        cudaMemcpy(d_depth, &child.depth, sizeof(int), cudaMemcpyHostToDevice);
-        cudaMemcpy(d_newPos, &i, sizeof(int), cudaMemcpyHostToDevice);
+        err = cudaMemcpy(d_depth, &child.depth, sizeof(int), cudaMemcpyHostToDevice); checkCudaError(err, __FILE__, __LINE__);
+        err = cudaMemcpy(d_newPos, &i, sizeof(int), cudaMemcpyHostToDevice); checkCudaError(err, __FILE__, __LINE__);
+        err = cudaMemcpy(d_excludedValues, excludedValues.data(), sizeof(removedVal) * excludedValues.size(), cudaMemcpyHostToDevice); checkCudaError(err, __FILE__, __LINE__);
         // excludeValues(domains, excludedValues, child.depth, i, constraints);
-        excludeValuesKernel<<<64, 8>>>(d_domains, d_domainSizes, d_excludedValues, d_excludedCount, d_depth, d_newPos, d_constraints, numConstraints, numVariables);
-        // copy domain back to host
-        err = cudaMemcpy(flatDomains.data(), d_domains, sizeof(char) * flatDomains.size(), cudaMemcpyDeviceToHost);
-        checkCudaError(err);
-        // copy excluded values back to host
-        err = cudaMemcpy(excludedValues.data(), d_excludedValues, sizeof(removedVal) * excludedValues.size(), cudaMemcpyDeviceToHost);
-        checkCudaError(err);
-        // copy flatDomains back to domains
-        for (int k = 0; k < numVariables; k++) {
-            for (int j = 0; j < domainSizes[k]; j++) {
-                // Assign value from flatDomains to domains
-                domains[k][j] = flatDomains[k * maxDomainSize + j];
+        excludeValuesKernel<<<64, 8>>>(d_domains, d_offsets, d_excludedValues, d_excludedCount, d_depth, d_newPos, d_constraints, numConstraints, numVariables);
+        cudaDeviceSynchronize();
+        // Copy updated domains and excluded values back to the host
+        err = cudaMemcpy(flatDomains.data(), d_domains, sizeof(char) * flatDomains.size(), cudaMemcpyDeviceToHost); checkCudaError(err, __FILE__, __LINE__);
+        // Get the count of excluded values
+        err = cudaMemcpy(&excludedCount, d_excludedCount, sizeof(int), cudaMemcpyDeviceToHost); checkCudaError(err, __FILE__, __LINE__);
+        // Resize the host excludedValues vector and copy data
+        std::vector<removedVal> excludedValues(excludedCount);
+        err = cudaMemcpy(excludedValues.data(), d_excludedValues, sizeof(removedVal) * excludedCount, cudaMemcpyDeviceToHost); checkCudaError(err, __FILE__, __LINE__);
+        // print current iter
+        std::cout << "Iter: " << i << std::endl;
+        // Reconstruct domains from flatDomains
+        for (int i = 0; i < numVariables; i++) {
+            domains[i].resize(offsets[i + 1] - offsets[i]);  // Ensure the domain is correctly sized
+            for (int j = offsets[i]; j < offsets[i + 1]; j++) {
+                domains[i][j - offsets[i]] = flatDomains[j];
             }
         }
-        // excludeValues(domains, excludedValues, child.depth, i, constraints);
-        // print excluded values
-        while(!excludedValues.empty()) {
-            removedVal val = excludedValues.back();
-            std::cout << "Excluded value: " << val.value << " of variable " << val.depth << " from variable " << val.var << std::endl;
-            excludedValues.pop_back();
-        }
+
+        // print domains 
+        // for (int i = 0; i < domains.size(); i++) {
+        //     for (int j = 0; j < domains[i].size(); j++) {
+        //         std::cout << (int)domains[i][j] << " ";
+        //     }
+        //     std::cout << std::endl;
+        // }
+
+        // Print excluded values for debugging
+        // for (const auto& val : excludedValues) {
+        //     std::cout << "Excluded value: " << val.value
+        //             << ", Depth: " << val.depth
+        //             << ", Variable: " << val.var 
+        //             << " at iter: " << i << std::endl;
+        // }
 
         generateAndBranch(child, constraints, upperBounds, excludedValues, domains, numSolutions, numVariables);
         reinsertValues(domains, excludedValues, child.depth);
+    }
+
+    // print excluded values
+    while(!excludedValues.empty()) {
+        std::cout << "Excluded value: " << excludedValues.back().value << " of variable " << excludedValues.back().var << " from variable " << excludedValues.back().depth << std::endl;
+        excludedValues.pop_back();
+    }
+
+    std::cout << "Domains after kernel call: " << std::endl;
+    for (int i = 0; i < domains.size(); i++) {
+        for (int j = 0; j < domains[i].size(); j++) {
+            std::cout << (int)domains[i][j] << " ";
+        }
+        std::cout << std::endl;
     }
 
     // free the memory
     cudaFree(d_domains);
     cudaFree(d_excludedValues);
     cudaFree(d_constraints);
-    cudaFree(d_domainSizes);
     cudaFree(d_excludedCount);
+    cudaFree(d_offsets);
+    cudaFree(d_depth);
+    cudaFree(d_newPos);
 }
