@@ -28,7 +28,7 @@ struct Node {
     ~Node() = default;
 };
 
-bool restrict_domains(const std::vector<std::pair<int, int>> &constraints, std::vector<std::vector<bool>> &domains, Node &node, int n) 
+bool restrict_domains(const std::vector<std::pair<int, int>> &constraints, std::vector<std::vector<bool>> &domains, Node &node) 
 {   
     bool changed = false;
     // iterate over the constraints
@@ -73,7 +73,7 @@ void generate_and_branch(const std::vector<std::pair<int, int>> &constraints, st
         // perform fixed point iteration to remove values from the domains
         // do {
         // } while(changed);
-        changed = restrict_domains(constraints, domains, node, n);
+        changed = restrict_domains(constraints, domains, node);
 
         // reached a fixed point, i.e. no more values can be removed from the domains
 
@@ -81,6 +81,7 @@ void generate_and_branch(const std::vector<std::pair<int, int>> &constraints, st
         // an assignment and create the corresponding new node
         if(node.assignedVars.size() == n) {
             numSolutions++;
+
             // print the solution
             // std::cout << "Solution: ";
             // for(int i = 0; i < n; i++) {
@@ -123,7 +124,7 @@ void generate_and_branch(const std::vector<std::pair<int, int>> &constraints, st
             } 
             else {
                 nodes.pop();
-                // // branch on the next value of the variable
+                // branch on the next value of the variable
                 int var = node.branchedVar;
                 int nextVal = std::find(domains[var].begin(), domains[var].end(), 1) - domains[var].begin();
                 domains[var][nextVal] = 0;
@@ -134,16 +135,17 @@ void generate_and_branch(const std::vector<std::pair<int, int>> &constraints, st
                 // iterate over all the remaining non zero values of the current branchedVar 
                 // all the configurations are solutions
                 // find the first non zero value in the domain
-                // int start = std::find(node.domains[node.branchedVar].begin(), node.domains[node.branchedVar].end(), 1) - node.domains[node.branchedVar].begin();
-                // for(int i = start; i <= node.domains[node.branchedVar].size(); ++i) 
-                // {
+                // numSolutions++;
+                // int start = std::find(domains[node.branchedVar].begin(), domains[node.branchedVar].end(), 1) - domains[node.branchedVar].begin();
+                // for(int i = start; i <= domains[node.branchedVar].size(); ++i) 
+                // {   
                 //     // remove the value from the domain of the variable
-                //     if(node.domains[node.branchedVar][i] == 1) {
+                //     if(domains[node.branchedVar][i] == 1) {
                 //         numSolutions++;
-                //         node.domains[node.branchedVar][i] = 0;
+                //         domains[node.branchedVar][i] = 0;
                 //     }
                 // }
-                // node.assignedVals[node.branchedVar] = node.domains[node.branchedVar].size()-1;
+                // node.assignedVals[node.branchedVar] = domains[node.branchedVar].size()-1;
                 // nodes.push(node);
             }
         }   

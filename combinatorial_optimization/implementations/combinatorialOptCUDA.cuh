@@ -239,7 +239,7 @@ void kernel_wrapper(std::vector<std::vector<char>>& domains, const std::vector<s
     err = cudaMalloc(&d_excludedCount, sizeof(int)); checkCudaError(err, __FILE__, __LINE__);
     err = cudaMalloc(&d_constraints, sizeof(std::pair<int, int>) * constraints.size()); checkCudaError(err, __FILE__, __LINE__);
     // Copy data to device
-    err = cudaMemcpy(d_domains, flatDomains.data(), sizeof(char) * flatDomains.size(), cudaMemcpyHostToDevice); checkCudaError(err, __FILE__, __LINE__);
+        err = cudaMemcpy(d_domains, flatDomains.data(), sizeof(char) * flatDomains.size(), cudaMemcpyHostToDevice); checkCudaError(err, __FILE__, __LINE__);
     err = cudaMemcpy(d_offsets, offsets.data(), sizeof(int) * offsets.size(), cudaMemcpyHostToDevice); checkCudaError(err, __FILE__, __LINE__);
     err = cudaMemcpy(d_constraints, constraints.data(), sizeof(std::pair<int, int>) * constraints.size(), cudaMemcpyHostToDevice); checkCudaError(err, __FILE__, __LINE__);
     err = cudaMemset(d_excludedCount, 0, sizeof(int)); checkCudaError(err, __FILE__, __LINE__);

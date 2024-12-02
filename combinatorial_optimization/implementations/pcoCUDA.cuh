@@ -1,10 +1,10 @@
+#include "cuda_runtime.h"
 #include <iostream>
 #include <vector>
 #include <chrono>
 #include <algorithm>
 #include <stack>  
 #include <thread>
-#include "parser.hpp" 
 
 struct Node {
     // vector of assigned variables, which will be empty at the beginning
@@ -131,22 +131,6 @@ void generate_and_branch(const std::vector<std::pair<int, int>> &constraints, st
                 node.assignedVals[var] = nextVal; 
                 // push again the updated node, since it has been previously popped
                 nodes.push(node);
-
-                // iterate over all the remaining non zero values of the current branchedVar 
-                // all the configurations are solutions
-                // find the first non zero value in the domain
-                // numSolutions++;
-                // int start = std::find(domains[node.branchedVar].begin(), domains[node.branchedVar].end(), 1) - domains[node.branchedVar].begin();
-                // for(int i = start; i <= domains[node.branchedVar].size(); ++i) 
-                // {   
-                //     // remove the value from the domain of the variable
-                //     if(domains[node.branchedVar][i] == 1) {
-                //         numSolutions++;
-                //         domains[node.branchedVar][i] = 0;
-                //     }
-                // }
-                // node.assignedVals[node.branchedVar] = domains[node.branchedVar].size()-1;
-                // nodes.push(node);
             }
         }   
         else {
@@ -170,62 +154,58 @@ void generate_and_branch(const std::vector<std::pair<int, int>> &constraints, st
     }
 }
 
-int main(int argc, char** argv) {
-    // Problem parameters
-    int  n;
-    std::vector<int> upperBounds;
-    std::vector<std::pair<int, int>> constraints;
-    // parse the input file
-    Data parser = Data();
+void checkCudaError(cudaError_t err, const char* file, int line) {
+    if(err != cudaSuccess) {
+        std::cerr << "CUDA error in file '" << file << "' in line " << line << ": " << cudaGetErrorString(err) << std::endl;
+        exit(EXIT_FAILURE);
+    }
+}
 
-    if (!parser.read_input(argv[1])) {
-        return 1;
+std::vector<bool> flatten_domains(std::vector<std::vector<bool>>& domains, std::vector<int>& upperBounds) {
+    std::vector<bool> flat_domains;
+    upperBounds.resize(domains.size());
+
+    for (size_t i = 0; i < domains.size(); ++i) {
+        upperBounds[i] = domains[i].size();
+        flat_domains.insert(flat_domains.end(), domains[i].begin(), domains[i].end());
     }
 
-    // Get the problem parameters
-    n = parser.get_n();
-    upperBounds.resize(n);
+    return flat_domains;
+}
 
-    // Get the constraints
-    for (size_t i = 0; i < n; ++i) {
-        for (size_t j = 0; j < n; ++j) {
-            if (parser.get_C_at(i, j) == 1) {
-                constraints.push_back({i, j});
-            }
-        }
+void kernel_wrapper(std::vector<std::vector<bool>>& domains, const std::vector<std::pair<int, int>>& constraints, std::vector<int>& upperBounds, size_t& numSolutions)
+{
+    int n = upperBounds.size();
+    cudaError_t err;
+
+    // flatten the domains
+    // std::vector<bool> flat_domains = flatten_domains(domains, upperBounds);
+
+    // Flatten domains and prepare offsets
+    std::vector<bool> flatDomains;
+    std::vector<int> offsets;
+    int currentOffset = 0;
+
+    for (const auto& domain : domains) {
+        offsets.push_back(currentOffset);
+        flatDomains.insert(flatDomains.end(), domain.begin(), domain.end());
+        currentOffset += domain.size();
     }
+    offsets.push_back(currentOffset);
 
-    // Remove duplicates
-    std::vector<std::pair<int, int>> uniqueConstraints;
-    for (auto& constraint : constraints) {
-        bool isDuplicate = false;
-        for (auto& unique : uniqueConstraints) {
-            if ((constraint.first == unique.second && constraint.second == unique.first) ||
-                (constraint.first == unique.first && constraint.second == unique.second)) {
-                isDuplicate = true;
-                break;
-            }
-        }
-        if (!isDuplicate) {
-            uniqueConstraints.push_back(constraint);
-        }
-    }
+    int total_elements = flatDomains.size();
 
-    // Get the upper bounds
-    for (size_t i = 0; i < n; ++i) {
-        upperBounds[i] = parser.get_u_at(i);
-    }
+    bool* d_domains;
+    std::pair<int, int>* d_constraints;
+    Node* d_node;
+    // Allocate and copy flattened domains
+    err = cudaMalloc(&d_domains, sizeof(bool) * flatDomains.size()); checkCudaError(err, __FILE__, __LINE__);    
+    err = cudaMalloc(&d_node, sizeof(Node)); checkCudaError(err, __FILE__, __LINE__);
+    err = cudaMalloc(&d_constraints, sizeof(std::pair<int, int>) * constraints.size()); checkCudaError(err, __FILE__, __LINE__);
+    // copy constraints only once, since they never change
+    err = cudaMemcpy(d_constraints, constraints.data(), sizeof(std::pair<int, int>) * constraints.size(), cudaMemcpyHostToDevice); checkCudaError(err, __FILE__, __LINE__);
+    // err = cudaMemcpy(d_domains, flatDomains.data(), sizeof(bool) * flatDomains.size(), cudaMemcpyHostToDevice); checkCudaError(err, __FILE__, __LINE__);
 
-    // vector of the domains of the variables, which is a vector of vectors of booleans, each one of size U_i
-    std::vector<std::vector<bool>> domains;
-    for(int i = 0; i < n; i++) {
-        std::vector<bool> domain(upperBounds[i]+1, 1);
-        domains.push_back(domain);
-    }
-
-
-    // number of solutions
-    size_t numSolutions = 0;
     // stack of nodes of the currently explored branch
     std::stack<Node> nodes;
     // create root node that contains the initial domains, the first variable that 
@@ -240,18 +220,10 @@ int main(int argc, char** argv) {
     domains[0][assignedVals[0]] = 0;
     nodes.push(root);
 
-    // start timer
-    auto start = std::chrono::high_resolution_clock::now();
+    generate_and_branch(constraints, domains, nodes, numSolutions, n);
 
-    generate_and_branch(uniqueConstraints, domains, nodes, numSolutions, n);
- 
-    // stop timer
-    auto end = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double> diff = end-start;
-
-    // print the number of solutions
-    std::cout << "Number of solutions: " << numSolutions << std::endl;
-    std::cout << "Time: " << diff.count() << " s" << std::endl;
-
-    return 0;
+    // free the memory
+    checkCudaError(cudaFree(d_domains), __FILE__, __LINE__);
+    checkCudaError(cudaFree(d_constraints), __FILE__, __LINE__);
+    checkCudaError(cudaFree(d_node), __FILE__, __LINE__);
 }

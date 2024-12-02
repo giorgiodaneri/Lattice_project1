@@ -5,6 +5,7 @@ check_res.py
 combinatorialOptBFS
 nqueens
 *.txt
+*pco
 .vscode
 combinatorial_optimization/nqueens
 combinatorial_optimization/job.sh
