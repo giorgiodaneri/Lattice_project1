@@ -96,7 +96,6 @@ void generate_and_branch(const std::vector<std::pair<int, int>> &constraints, st
         // need to check if the current configuration is a solution, otherwise force
         // an assignment and create the corresponding new node
         if(node.assignedVars.size() == n) {
-            numSolutions++;
             // print the solution
             // std::cout << "Solution: ";
             // for(int i = 0; i < n; i++) {
@@ -138,15 +137,29 @@ void generate_and_branch(const std::vector<std::pair<int, int>> &constraints, st
                 nodes.push(node);
             } 
             else {
+                numSolutions++;
                 nodes.pop();
-                // branch on the next value of the variable
-                int var = node.branchedVar;
-                int nextVal = std::find(node.domains[var].begin(), node.domains[var].end(), 1) - node.domains[var].begin();
-                node.domains[var][nextVal] = 0;
-                node.assignedVals[var] = nextVal; 
-                // push again the updated node, since it has been previously popped
+                // // branch on the next value of the variable
+                // int var = node.branchedVar;
+                // int nextVal = std::find(node.domains[var].begin(), node.domains[var].end(), 1) - node.domains[var].begin();
+                // node.domains[var][nextVal] = 0;
+                // node.assignedVals[var] = nextVal; 
+                // // push again the updated node, since it has been previously popped
+                // nodes.push(node);
+                // iterate over all the remaining non zero values of the current branchedVar 
+                // all the configurations are solutions
+                // find the first non zero value in the domain
+                int start = std::find(node.domains[node.branchedVar].begin(), node.domains[node.branchedVar].end(), 1) - node.domains[node.branchedVar].begin();
+                for(int i = start; i <= node.domains[node.branchedVar].size(); i++) 
+                {
+                    // remove the value from the domain of the variable
+                    if(node.domains[node.branchedVar][i] == 1) {
+                        numSolutions++;
+                        node.domains[node.branchedVar][i] = 0;
+                    }
+                }
+                node.assignedVals[node.branchedVar] = node.domains[node.branchedVar].size()-1;
                 nodes.push(node);
-                node = nodes.top();
             }
         }   
         else {

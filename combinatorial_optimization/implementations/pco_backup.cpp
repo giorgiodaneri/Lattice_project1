@@ -7,14 +7,14 @@
 #include "parser.hpp" 
 
 struct Node {
-    std::vector<std::vector<char>> domains;
+    std::vector<std::vector<bool>> domains;
     // vector of assigned variables, which will be empty at the beginning
     std::vector<int> assignedVars;
     // vector of corresponding assigned values
     std::vector<int> assignedVals;
     int branchedVar;
 
-    Node(std::vector<std::vector<char>> domains, std::vector<int> vars, std::vector<int> vals, int var) : domains(domains), assignedVars(vars), assignedVals(vals), branchedVar(var) {}
+    Node(std::vector<std::vector<bool>> domains, std::vector<int> vars, std::vector<int> vals, int var) : domains(domains), assignedVars(vars), assignedVals(vals), branchedVar(var) {}
     Node(const Node& node) {
         domains = node.domains;
         assignedVars = node.assignedVars;
@@ -23,7 +23,7 @@ struct Node {
     }
     Node(Node&) = default;
     Node() {
-        domains = std::vector<std::vector<char>>();
+        domains = std::vector<std::vector<bool>>();
         assignedVars = std::vector<int>();
         assignedVals = std::vector<int>();
         branchedVar = 0;
@@ -128,7 +128,7 @@ void generate_and_branch(const std::vector<std::pair<int, int>> &constraints, st
 
                 // reset the domains of all variables greater than branchedVar of current node
                 for(int i = node.branchedVar+1; i < n; i++) {
-                    node.domains[i] = std::vector<char>(node.domains[i].size(), 1);
+                    node.domains[i] = std::vector<bool>(node.domains[i].size(), 1);
                 }
 
                 // modify the current node with the next valid value in the domain of the branched variable
@@ -217,9 +217,9 @@ int main(int argc, char** argv) {
     }
 
     // vector of the domains of the variables, which is a vector of vectors of booleans, each one of size U_i
-    std::vector<std::vector<char>> domains;
+    std::vector<std::vector<bool>> domains;
     for(int i = 0; i < n; i++) {
-        std::vector<char> domain(upperBounds[i]+1, 1);
+        std::vector<bool> domain(upperBounds[i]+1, 1);
         domains.push_back(domain);
     }
 
