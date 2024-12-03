@@ -27,7 +27,7 @@ struct Node {
 };
 
 __global__ void restrictDomainsKernel(
-    const std::pair<int, int>* d_constraints, int* numConstraints,
+    const int* d_constraintsLeft, const int* d_constraintsRight, int* numConstraints,
     uint8_t* d_domains, const int* d_offsets, 
     const int* d_assignedVals, const int* d_branchVar) 
 {
@@ -36,9 +36,8 @@ __global__ void restrictDomainsKernel(
     if (tid >= *numConstraints) return; // Exit if thread index exceeds number of constraints
 
     // Fetch the current constraint
-    auto constraint = d_constraints[tid];
-    int var1 = constraint.first;
-    int var2 = constraint.second;
+    int var1 = d_constraintsLeft[tid];
+    int var2 = d_constraintsRight[tid];
 
     // Check if var1 and var2 are assigned
     bool isAssigned1 = var1 <= *d_branchVar;
@@ -47,9 +46,9 @@ __global__ void restrictDomainsKernel(
     // If both variables are assigned, move to the next constraint
     if (isAssigned1 && isAssigned2) return;
 
-    // Get assigned values if any, using pointer arithmetic
-    int assignedVal1 = isAssigned1 ? (d_assignedVals[var1]) : -1;
-    int assignedVal2 = isAssigned2 ? (d_assignedVals[var2])  : -1;
+    // Get assigned values if any
+    int assignedVal1 = isAssigned1 ? d_assignedVals[var1] : -1;
+    int assignedVal2 = isAssigned2 ? d_assignedVals[var2] : -1;
 
     // Compute domain start and end for var1 and var2
     int start1 = d_offsets[var1];
@@ -58,7 +57,6 @@ __global__ void restrictDomainsKernel(
     int end2 = d_offsets[var2 + 1];
 
     // If var1 is assigned and the value is in var2's domain, remove it
-    // do not bother checking whether it is already set to 0, set it to 0 anyways
     if (isAssigned1 && assignedVal1 >= 0 && start2 + assignedVal1 < end2) {
         d_domains[start2 + assignedVal1] = 0;
     }
@@ -76,33 +74,35 @@ void checkCudaError(cudaError_t err, const char* file, int line) {
     }
 }
 
-bool restrict_domains(const std::vector<std::pair<int, int>> &constraints, std::vector<std::vector<bool>> &domains, Node &node) 
+bool restrict_domains(const std::vector<int>& constraintsLeft, const std::vector<int>& constraintsRight, std::vector<std::vector<bool>> &domains, Node &node) 
 {   
     bool changed = false;
-    // iterate over the constraints
-    for(auto& constraint : constraints) {
-        int var1 = constraint.first;
-        int var2 = constraint.second;
+
+    // Iterate over the constraints using the two separate vectors
+    for (size_t i = 0; i < constraintsLeft.size(); ++i) {
+        int var1 = constraintsLeft[i];
+        int var2 = constraintsRight[i];
         bool isAssigned1 = false;
         bool isAssigned2 = false;
-        // check if var1 and var2 are inside the assigned variables
-        if(node.branchedVar+1 > var1) {
+
+        // Check if var1 and var2 are inside the assigned variables
+        if (node.branchedVar + 1 > var1) {
             isAssigned1 = true;
         }
-        if(node.branchedVar+1 > var2) {
+        if (node.branchedVar + 1 > var2) {
             isAssigned2 = true;
         }
-        // if both variables are assigned, check next constraint since current one cannot be violated
-        if(isAssigned1 && isAssigned2) continue;
-        // if one of the variables is assigned, check if the constraint is violated
-        // with respect to its current value
-        if(isAssigned1 && domains[var2][node.assignedVals[var1]] == 1) {
-            // remove the value from the domain of var2
+
+        // If both variables are assigned, skip the current constraint
+        if (isAssigned1 && isAssigned2) continue;
+
+        // If one variable is assigned, check if the constraint is violated
+        if (isAssigned1 && domains[var2][node.assignedVals[var1]] == 1) {
+            // Remove the value from the domain of var2
             domains[var2][node.assignedVals[var1]] = 0;
             changed = true;
-        }
-        else if (isAssigned2 && domains[var1][node.assignedVals[var2]] == 1) {
-            // remove the value from the domain of var1
+        } else if (isAssigned2 && domains[var1][node.assignedVals[var2]] == 1) {
+            // Remove the value from the domain of var1
             domains[var1][node.assignedVals[var2]] = 0;
             changed = true;
         }
@@ -110,7 +110,7 @@ bool restrict_domains(const std::vector<std::pair<int, int>> &constraints, std::
     return changed;
 }
 
-void generate_and_branch(const std::vector<std::pair<int, int>> &constraints, std::pair<int, int>* d_constraints, int* d_numConstraints, std::vector<std::vector<bool>> domains, uint8_t *d_domains, std::vector<uint8_t> flatDomains,
+void generate_and_branch(const std::vector<int>& constraintsLeft, const std::vector<int>& constraintsRight, int* d_constraintsLeft, int* d_constraintsRight, int* d_numConstraints, std::vector<std::vector<bool>> domains, uint8_t *d_domains, std::vector<uint8_t> flatDomains,
         std::vector<int> offsets, int* d_offsets, std::stack<Node>& nodes, int* d_assignedVals, int* d_branchVar, size_t &numSolutions, int n) {
     
     cudaError_t err;
@@ -136,7 +136,7 @@ void generate_and_branch(const std::vector<std::pair<int, int>> &constraints, st
             err = cudaMemcpy(d_assignedVals, node.assignedVals.data(), sizeof(int) * node.assignedVals.size(), cudaMemcpyHostToDevice); checkCudaError(err, __FILE__, __LINE__);
             err = cudaMemcpy(d_branchVar, &node.branchedVar, sizeof(int), cudaMemcpyHostToDevice); checkCudaError(err, __FILE__, __LINE__);
             // launch the kernel to restrict the domains
-            restrictDomainsKernel<<<BLOCK_SIZE, BLOCK_SIZE>>>(d_constraints, d_numConstraints, d_domains, d_offsets, d_assignedVals, d_branchVar);
+            restrictDomainsKernel<<<BLOCK_SIZE, BLOCK_SIZE>>>(d_constraintsLeft, d_constraintsRight, d_numConstraints, d_domains, d_offsets, d_assignedVals, d_branchVar);
             // copy the flatDomains back to the host
             err = cudaMemcpy(flatDomains.data(), d_domains, sizeof(uint8_t) * flatDomains.size(), cudaMemcpyDeviceToHost); checkCudaError(err, __FILE__, __LINE__);
             // update the domains
@@ -243,7 +243,7 @@ void generate_and_branch(const std::vector<std::pair<int, int>> &constraints, st
     }
 }
 
-void kernel_wrapper(std::vector<std::vector<bool>>& domains, const std::vector<std::pair<int, int>>& constraints, std::vector<int>& upperBounds, size_t& numSolutions)
+void kernel_wrapper(std::vector<std::vector<bool>>& domains, const std::vector<int>& constraintsLeft, const std::vector<int>& constraintsRight, std::vector<int>& upperBounds, size_t& numSolutions)
 {
     int n = upperBounds.size();
     cudaError_t err;
@@ -262,23 +262,26 @@ void kernel_wrapper(std::vector<std::vector<bool>>& domains, const std::vector<s
     offsets.push_back(currentOffset);
 
     // number of constraints
-    int numConstraints = constraints.size();
+    int numConstraints = constraintsLeft.size();
 
     uint8_t* d_domains;
     int* d_offsets;
     int* d_assignedVals;
     int* d_branchVar;
-    std::pair<int, int>* d_constraints;
+    int* d_constraintsLeft;
+    int* d_constraintsRight;
     int* d_numConstraints;
     // Allocate and copy flattened domains
     err = cudaMalloc(&d_domains, sizeof(uint8_t) * flatDomains.size()); checkCudaError(err, __FILE__, __LINE__);    
     err = cudaMalloc(&d_offsets, sizeof(int) * offsets.size()); checkCudaError(err, __FILE__, __LINE__);
     err = cudaMalloc(&d_assignedVals, sizeof(int) * n); checkCudaError(err, __FILE__, __LINE__);
     err = cudaMalloc(&d_branchVar, sizeof(int)); checkCudaError(err, __FILE__, __LINE__);
-    err = cudaMalloc(&d_constraints, sizeof(std::pair<int, int>) * constraints.size()); checkCudaError(err, __FILE__, __LINE__);
+    err = cudaMalloc(&d_constraintsLeft, sizeof(int) * constraintsLeft.size()); checkCudaError(err, __FILE__, __LINE__);
+    err = cudaMalloc(&d_constraintsRight, sizeof(int) * constraintsRight.size()); checkCudaError(err, __FILE__, __LINE__);
     err = cudaMalloc(&d_numConstraints, sizeof(int)); checkCudaError(err, __FILE__, __LINE__);  
     // copy constraints only once, since they never change
-    err = cudaMemcpy(d_constraints, constraints.data(), sizeof(std::pair<int, int>) * constraints.size(), cudaMemcpyHostToDevice); checkCudaError(err, __FILE__, __LINE__);
+    err = cudaMemcpy(d_constraintsLeft, constraintsLeft.data(), sizeof(int) * constraintsLeft.size(), cudaMemcpyHostToDevice); checkCudaError(err, __FILE__, __LINE__);
+    err = cudaMemcpy(d_constraintsRight, constraintsRight.data(), sizeof(int) * constraintsRight.size(), cudaMemcpyHostToDevice); checkCudaError(err, __FILE__, __LINE__);
     err = cudaMemcpy(d_offsets, offsets.data(), sizeof(int) * offsets.size(), cudaMemcpyHostToDevice); checkCudaError(err, __FILE__, __LINE__);
     err = cudaMemcpy(d_numConstraints, &numConstraints, sizeof(int), cudaMemcpyHostToDevice); checkCudaError(err, __FILE__, __LINE__);
     // stack of nodes of the currently explored branch
@@ -293,12 +296,13 @@ void kernel_wrapper(std::vector<std::vector<bool>>& domains, const std::vector<s
     domains[0][assignedVals[0]] = 0;
     nodes.push(root);
 
-    generate_and_branch(constraints, d_constraints, d_numConstraints, domains, d_domains, flatDomains, offsets, d_offsets, nodes, d_assignedVals, d_branchVar, numSolutions, n);
+    generate_and_branch(constraintsLeft, constraintsRight, d_constraintsLeft, d_constraintsRight, d_numConstraints, domains, d_domains, flatDomains, offsets, d_offsets, nodes, d_assignedVals, d_branchVar, numSolutions, n);
 
     // free the memory
     checkCudaError(cudaFree(d_domains), __FILE__, __LINE__);
     checkCudaError(cudaFree(d_offsets), __FILE__, __LINE__);
-    checkCudaError(cudaFree(d_constraints), __FILE__, __LINE__);
+    checkCudaError(cudaFree(d_constraintsLeft), __FILE__, __LINE__);
+    checkCudaError(cudaFree(d_constraintsRight), __FILE__, __LINE__);
     checkCudaError(cudaFree(d_numConstraints), __FILE__, __LINE__);
     checkCudaError(cudaFree(d_assignedVals), __FILE__, __LINE__);
     checkCudaError(cudaFree(d_branchVar), __FILE__, __LINE__);
