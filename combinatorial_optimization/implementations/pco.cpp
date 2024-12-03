@@ -71,9 +71,22 @@ void generate_and_branch(const std::vector<std::pair<int, int>> &constraints, st
         bool changed = false;
 
         // perform fixed point iteration to remove values from the domains
-        // do {
-        // } while(changed);
-        changed = restrict_domains(constraints, domains, node);
+        do {
+            changed = restrict_domains(constraints, domains, node);
+        
+            // find all the variables that have been forcefully assigned due to constraint application
+            // and the relative values, so that we actually have a solution
+            for(int i = 0; i < n; i++) {
+                if(std::count(domains[i].begin(), domains[i].end(), 1) == 1) {
+                    // domain of the variable has only one value, corresponds to an assignment
+                    // check if it is already assigned, do not add it again
+                    if(std::find(node.assignedVars.begin(), node.assignedVars.end(), i) != node.assignedVars.end()) continue;
+                    node.assignedVars.push_back(i);
+                    node.assignedVals.push_back(std::find(domains[i].begin(), domains[i].end(), 1) - domains[i].begin());
+                    changed = true;
+                }
+            }
+        } while(changed);
 
         // reached a fixed point, i.e. no more values can be removed from the domains
 
