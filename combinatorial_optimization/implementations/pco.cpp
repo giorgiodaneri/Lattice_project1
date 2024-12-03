@@ -8,20 +8,17 @@
 
 struct Node {
     // vector of assigned variables, which will be empty at the beginning
-    std::vector<int> assignedVars;
     // vector of corresponding assigned values
     std::vector<int> assignedVals;
     int branchedVar;
 
-    Node(std::vector<int> vars, std::vector<int> vals, int var) : assignedVars(vars), assignedVals(vals), branchedVar(var) {}
+    Node(std::vector<int> vals, int var) : assignedVals(vals), branchedVar(var) {}
     Node(const Node& node) {
-        assignedVars = node.assignedVars;
         assignedVals = node.assignedVals;
         branchedVar = node.branchedVar;
     }
     Node(Node&) = default;
     Node() {
-        assignedVars = std::vector<int>();
         assignedVals = std::vector<int>();
         branchedVar = 0;
     }
@@ -38,10 +35,10 @@ bool restrict_domains(const std::vector<std::pair<int, int>> &constraints, std::
         bool isAssigned1 = false;
         bool isAssigned2 = false;
         // check if var1 and var2 are inside the assigned variables
-        if(node.assignedVars.size() > var1) {
+        if(node.branchedVar+1 > var1) {
             isAssigned1 = true;
         }
-        if(node.assignedVars.size() > var2) {
+        if(node.branchedVar+1 > var2) {
             isAssigned2 = true;
         }
         // if both variables are assigned, check next constraint since current one cannot be violated
@@ -76,12 +73,11 @@ void generate_and_branch(const std::vector<std::pair<int, int>> &constraints, st
         
             // find all the variables that have been forcefully assigned due to constraint application
             // and the relative values, so that we actually have a solution
-            for(int i = 0; i < n; i++) {
+            // only check the domains of the variables that are > branchedVar, since the others are already assigned
+            for(int i = node.branchedVar+1; i < n; i++) {
                 if(std::count(domains[i].begin(), domains[i].end(), 1) == 1) {
                     // domain of the variable has only one value, corresponds to an assignment
-                    // check if it is already assigned, do not add it again
-                    if(std::find(node.assignedVars.begin(), node.assignedVars.end(), i) != node.assignedVars.end()) continue;
-                    node.assignedVars.push_back(i);
+                    node.branchedVar = i;
                     node.assignedVals.push_back(std::find(domains[i].begin(), domains[i].end(), 1) - domains[i].begin());
                     changed = true;
                 }
@@ -92,8 +88,8 @@ void generate_and_branch(const std::vector<std::pair<int, int>> &constraints, st
 
         // need to check if the current configuration is a solution, otherwise force
         // an assignment and create the corresponding new node
-        if(node.assignedVars.size() == n) {
-            numSolutions++;
+        if(node.branchedVar == n-1) {
+            // numSolutions++;
 
             // print the solution
             // std::cout << "Solution: ";
@@ -136,30 +132,22 @@ void generate_and_branch(const std::vector<std::pair<int, int>> &constraints, st
                 nodes.push(node);
             } 
             else {
+                numSolutions++;
                 nodes.pop();
-                // branch on the next value of the variable
-                int var = node.branchedVar;
-                int nextVal = std::find(domains[var].begin(), domains[var].end(), 1) - domains[var].begin();
-                domains[var][nextVal] = 0;
-                node.assignedVals[var] = nextVal; 
-                // push again the updated node, since it has been previously popped
-                nodes.push(node);
-
                 // iterate over all the remaining non zero values of the current branchedVar 
                 // all the configurations are solutions
-                // find the first non zero value in the domain
-                // numSolutions++;
-                // int start = std::find(domains[node.branchedVar].begin(), domains[node.branchedVar].end(), 1) - domains[node.branchedVar].begin();
-                // for(int i = start; i <= domains[node.branchedVar].size(); ++i) 
-                // {   
-                //     // remove the value from the domain of the variable
-                //     if(domains[node.branchedVar][i] == 1) {
-                //         numSolutions++;
-                //         domains[node.branchedVar][i] = 0;
-                //     }
-                // }
-                // node.assignedVals[node.branchedVar] = domains[node.branchedVar].size()-1;
-                // nodes.push(node);
+                int start = node.assignedVals.back()+1;
+                int maxValue = domains[node.branchedVar].size();
+                for(int i = start; i < maxValue; ++i) 
+                {   
+                    // remove the value from the domain of the variable
+                    if(domains[node.branchedVar][i] == 1) {
+                        numSolutions++;
+                        domains[node.branchedVar][i] = 0;
+                    }
+                }
+                node.assignedVals[node.branchedVar] = maxValue-1;
+                nodes.push(node);
             }
         }   
         else {
@@ -170,13 +158,10 @@ void generate_and_branch(const std::vector<std::pair<int, int>> &constraints, st
             int newVal = std::find(domains[node.branchedVar+1].begin(), domains[node.branchedVar+1].end(), 1) - domains[node.branchedVar+1].begin();
             // set this value to 0 in the parent domain
             domains[node.branchedVar+1][newVal] = 0;
-            // node.domains[node.branchedVar+1][node.assignedVals[node.branchedVar]] = 0;
-            std::vector<int> assignedVars = node.assignedVars;
             std::vector<int> assignedVals = node.assignedVals;
-            assignedVars.push_back(node.branchedVar+1);
             assignedVals.push_back(newVal);
             // select next variable to branch on as the one after branchedVar
-            Node newNode(assignedVars, assignedVals, node.branchedVar+1);
+            Node newNode(assignedVals, node.branchedVar+1);
             // and push the new node to the stack
             nodes.push(newNode);
         }
@@ -244,12 +229,10 @@ int main(int argc, char** argv) {
     // create root node that contains the initial domains, the first variable that 
     // will be branched is 0
     // declare two vectors of size n to hold the assigned variables and values
-    std::vector<int> assignedVars;
     std::vector<int> assignedVals;
-    assignedVars.push_back(0);
     assignedVals.push_back(0);
     // remove the value from the domain of the variable
-    Node root(assignedVars, assignedVals, 0);
+    Node root(assignedVals, 0);
     domains[0][assignedVals[0]] = 0;
     nodes.push(root);
 
