@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <stack>  
 #include <thread>
+#include <set>
+#include <utility>
 #include "parser.hpp" 
 
 struct Node {
@@ -25,33 +27,35 @@ struct Node {
     ~Node() = default;
 };
 
-bool restrict_domains(const std::vector<std::pair<int, int>> &constraints, std::vector<std::vector<bool>> &domains, Node &node) 
+bool restrict_domains(const std::vector<int>& constraintsLeft, const std::vector<int>& constraintsRight, std::vector<std::vector<bool>> &domains, Node &node) 
 {   
     bool changed = false;
-    // iterate over the constraints
-    for(auto& constraint : constraints) {
-        int var1 = constraint.first;
-        int var2 = constraint.second;
+
+    // Iterate over the constraints using the two separate vectors
+    for (size_t i = 0; i < constraintsLeft.size(); ++i) {
+        int var1 = constraintsLeft[i];
+        int var2 = constraintsRight[i];
         bool isAssigned1 = false;
         bool isAssigned2 = false;
-        // check if var1 and var2 are inside the assigned variables
-        if(node.branchedVar+1 > var1) {
+
+        // Check if var1 and var2 are inside the assigned variables
+        if (node.branchedVar + 1 > var1) {
             isAssigned1 = true;
         }
-        if(node.branchedVar+1 > var2) {
+        if (node.branchedVar + 1 > var2) {
             isAssigned2 = true;
         }
-        // if both variables are assigned, check next constraint since current one cannot be violated
-        if(isAssigned1 && isAssigned2) continue;
-        // if one of the variables is assigned, check if the constraint is violated
-        // with respect to its current value
-        if(isAssigned1 && domains[var2][node.assignedVals[var1]] == 1) {
-            // remove the value from the domain of var2
+
+        // If both variables are assigned, skip the current constraint
+        if (isAssigned1 && isAssigned2) continue;
+
+        // If one variable is assigned, check if the constraint is violated
+        if (isAssigned1 && domains[var2][node.assignedVals[var1]] == 1) {
+            // Remove the value from the domain of var2
             domains[var2][node.assignedVals[var1]] = 0;
             changed = true;
-        }
-        else if (isAssigned2 && domains[var1][node.assignedVals[var2]] == 1) {
-            // remove the value from the domain of var1
+        } else if (isAssigned2 && domains[var1][node.assignedVals[var2]] == 1) {
+            // Remove the value from the domain of var1
             domains[var1][node.assignedVals[var2]] = 0;
             changed = true;
         }
@@ -59,7 +63,7 @@ bool restrict_domains(const std::vector<std::pair<int, int>> &constraints, std::
     return changed;
 }
 
-void generate_and_branch(const std::vector<std::pair<int, int>> &constraints, std::vector<std::vector<bool>> domains, std::stack<Node>& nodes, size_t &numSolutions, int n) {
+void generate_and_branch(const std::vector<int>& constraintsLeft, const std::vector<int>& constraintsRight, std::vector<std::vector<bool>> domains, std::stack<Node>& nodes, size_t &numSolutions, int n) {
     bool loop = true;
     bool changed = false;
     while(loop)
@@ -69,7 +73,7 @@ void generate_and_branch(const std::vector<std::pair<int, int>> &constraints, st
 
         // perform fixed point iteration to remove values from the domains
         do {
-            changed = restrict_domains(constraints, domains, node);
+            changed = restrict_domains(constraintsLeft, constraintsRight, domains, node);
         
             // find all the variables that have been forcefully assigned due to constraint application
             // and the relative values, so that we actually have a solution
@@ -168,11 +172,39 @@ void generate_and_branch(const std::vector<std::pair<int, int>> &constraints, st
     }
 }
 
+void extractUniqueConstraints(const std::vector<int>& constraintsLeft,
+                               const std::vector<int>& constraintsRight,
+                               std::vector<int>& uniqueConstraintsLeft,
+                               std::vector<int>& uniqueConstraintsRight) {
+    // Use a set to store unique normalized pairs
+    std::set<std::pair<int, int>> uniquePairs;
+
+    for (size_t i = 0; i < constraintsLeft.size(); ++i) {
+        // Normalize the pair: always store the smaller value first
+        int left = constraintsLeft[i];
+        int right = constraintsRight[i];
+        std::pair<int, int> constraintPair = std::minmax(left, right);
+
+        // Insert the normalized pair into the set
+        uniquePairs.insert(constraintPair);
+    }
+
+    // Clear the unique vectors to store new values
+    uniqueConstraintsLeft.clear();
+    uniqueConstraintsRight.clear();
+
+    // Populate the unique constraints
+    for (const auto& pair : uniquePairs) {
+        uniqueConstraintsLeft.push_back(pair.first);
+        uniqueConstraintsRight.push_back(pair.second);
+    }
+}
+
 int main(int argc, char** argv) {
     // Problem parameters
     int  n;
     std::vector<int> upperBounds;
-    std::vector<std::pair<int, int>> constraints;
+    // std::vector<std::pair<int, int>> constraints;
     // parse the input file
     Data parser = Data();
 
@@ -184,30 +216,23 @@ int main(int argc, char** argv) {
     n = parser.get_n();
     upperBounds.resize(n);
 
+    // store constraints in two separate vectors, one for the left hand side, one for the right hand side
+    std::vector<int> constraintsLeft;
+    std::vector<int> constraintsRight;
     // Get the constraints
     for (size_t i = 0; i < n; ++i) {
         for (size_t j = 0; j < n; ++j) {
             if (parser.get_C_at(i, j) == 1) {
-                constraints.push_back({i, j});
+                constraintsLeft.push_back(i);
+                constraintsRight.push_back(j);
             }
         }
     }
 
     // Remove duplicates
-    std::vector<std::pair<int, int>> uniqueConstraints;
-    for (auto& constraint : constraints) {
-        bool isDuplicate = false;
-        for (auto& unique : uniqueConstraints) {
-            if ((constraint.first == unique.second && constraint.second == unique.first) ||
-                (constraint.first == unique.first && constraint.second == unique.second)) {
-                isDuplicate = true;
-                break;
-            }
-        }
-        if (!isDuplicate) {
-            uniqueConstraints.push_back(constraint);
-        }
-    }
+    std::vector<int> uniqueConstraintsLeft;
+    std::vector<int> uniqueConstraintsRight;
+    extractUniqueConstraints(constraintsLeft, constraintsRight, uniqueConstraintsLeft, uniqueConstraintsRight);
 
     // Get the upper bounds
     for (size_t i = 0; i < n; ++i) {
@@ -239,7 +264,7 @@ int main(int argc, char** argv) {
     // start timer
     auto start = std::chrono::high_resolution_clock::now();
 
-    generate_and_branch(uniqueConstraints, domains, nodes, numSolutions, n);
+    generate_and_branch(uniqueConstraintsLeft, uniqueConstraintsRight, domains, nodes, numSolutions, n);
  
     // stop timer
     auto end = std::chrono::high_resolution_clock::now();
