@@ -176,24 +176,19 @@ void extractUniqueConstraints(const std::vector<int>& constraintsLeft,
                                const std::vector<int>& constraintsRight,
                                std::vector<int>& uniqueConstraintsLeft,
                                std::vector<int>& uniqueConstraintsRight) {
-    // Use a set to store unique normalized pairs
+    // use a set to store unique normalized pairs
     std::set<std::pair<int, int>> uniquePairs;
-
     for (size_t i = 0; i < constraintsLeft.size(); ++i) {
-        // Normalize the pair: always store the smaller value first
+        // store the smaller value first
         int left = constraintsLeft[i];
         int right = constraintsRight[i];
         std::pair<int, int> constraintPair = std::minmax(left, right);
-
-        // Insert the normalized pair into the set
         uniquePairs.insert(constraintPair);
     }
-
-    // Clear the unique vectors to store new values
+    // remove the unique vectors to store new values
     uniqueConstraintsLeft.clear();
     uniqueConstraintsRight.clear();
-
-    // Populate the unique constraints
+    // fill the unique constraints
     for (const auto& pair : uniquePairs) {
         uniqueConstraintsLeft.push_back(pair.first);
         uniqueConstraintsRight.push_back(pair.second);
@@ -201,25 +196,20 @@ void extractUniqueConstraints(const std::vector<int>& constraintsLeft,
 }
 
 int main(int argc, char** argv) {
-    // Problem parameters
     int  n;
     std::vector<int> upperBounds;
-    // std::vector<std::pair<int, int>> constraints;
     // parse the input file
     Data parser = Data();
-
     if (!parser.read_input(argv[1])) {
         return 1;
     }
-
-    // Get the problem parameters
+    // get the problem parameters
     n = parser.get_n();
     upperBounds.resize(n);
-
     // store constraints in two separate vectors, one for the left hand side, one for the right hand side
     std::vector<int> constraintsLeft;
     std::vector<int> constraintsRight;
-    // Get the constraints
+    // get the constraints
     for (size_t i = 0; i < n; ++i) {
         for (size_t j = 0; j < n; ++j) {
             if (parser.get_C_at(i, j) == 1) {
@@ -228,17 +218,15 @@ int main(int argc, char** argv) {
             }
         }
     }
-
-    // Remove duplicates
+    // remove duplicates from the constraints
     std::vector<int> uniqueConstraintsLeft;
     std::vector<int> uniqueConstraintsRight;
     extractUniqueConstraints(constraintsLeft, constraintsRight, uniqueConstraintsLeft, uniqueConstraintsRight);
 
-    // Get the upper bounds
+    // upper bounds of the domains
     for (size_t i = 0; i < n; ++i) {
         upperBounds[i] = parser.get_u_at(i);
     }
-
     // vector of the domains of the variables, which is a vector of vectors of booleans, each one of size U_i
     std::vector<std::vector<bool>> domains;
     for(int i = 0; i < n; i++) {
@@ -246,31 +234,26 @@ int main(int argc, char** argv) {
         domains.push_back(domain);
     }
 
-
-    // number of solutions
     size_t numSolutions = 0;
     // stack of nodes of the currently explored branch
     std::stack<Node> nodes;
-    // create root node that contains the initial domains, the first variable that 
-    // will be branched is 0
-    // declare two vectors of size n to hold the assigned variables and values
+    // declare two vectors of size n to hold the assigned values, first one is 0
     std::vector<int> assignedVals;
     assignedVals.push_back(0);
-    // remove the value from the domain of the variable
+    // create root node that contains the initial domains, the first variable that will be branched is 0
     Node root(assignedVals, 0);
+    // remove the value from the domain of the variable
     domains[0][assignedVals[0]] = 0;
     nodes.push(root);
 
     // start timer
     auto start = std::chrono::high_resolution_clock::now();
-
     generate_and_branch(uniqueConstraintsLeft, uniqueConstraintsRight, domains, nodes, numSolutions, n);
- 
     // stop timer
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> diff = end-start;
 
-    // print the number of solutions
+    // print the number of solutions and exeuction time
     std::cout << "Number of solutions: " << numSolutions << std::endl;
     std::cout << "Time: " << diff.count() << " s" << std::endl;
 
