@@ -7,7 +7,7 @@
 #include <thread>
 
 #define BLOCK_SIZE 16
-#define SHARED_SIZE 256
+#define SHARED_SIZE 128
 
 struct Node {
     // vector of corresponding assigned values
@@ -78,8 +78,6 @@ __global__ void restrictDomainsKernelShared(
         s_constraintsLeft[blockTid] = d_constraintsLeft[tid];
         s_constraintsRight[blockTid] = d_constraintsRight[tid];
     }
-    
-    __syncthreads();
 
     // thread index exceeds number of constraints, exit
     if (tid >= *numConstraints) return;
@@ -112,43 +110,6 @@ void checkCudaError(cudaError_t err, const char* file, int line) {
     }
 }
 
-// function to restrict the domains based on the constraints, only for the CPU
-bool restrict_domains(const std::vector<int>& constraintsLeft, const std::vector<int>& constraintsRight, std::vector<std::vector<bool>> &domains, Node &node) 
-{   
-    bool changed = false;
-
-    // Iterate over the constraints using the two separate vectors
-    for (size_t i = 0; i < constraintsLeft.size(); ++i) {
-        int var1 = constraintsLeft[i];
-        int var2 = constraintsRight[i];
-        bool isAssigned1 = false;
-        bool isAssigned2 = false;
-
-        // Check if var1 and var2 are inside the assigned variables
-        if (node.branchedVar + 1 > var1) {
-            isAssigned1 = true;
-        }
-        if (node.branchedVar + 1 > var2) {
-            isAssigned2 = true;
-        }
-
-        // If both variables are assigned, skip the current constraint
-        if (isAssigned1 && isAssigned2) continue;
-
-        // If one variable is assigned, check if the constraint is violated
-        if (isAssigned1 && domains[var2][node.assignedVals[var1]] == 1) {
-            // Remove the value from the domain of var2
-            domains[var2][node.assignedVals[var1]] = 0;
-            changed = true;
-        } else if (isAssigned2 && domains[var1][node.assignedVals[var2]] == 1) {
-            // Remove the value from the domain of var1
-            domains[var1][node.assignedVals[var2]] = 0;
-            changed = true;
-        }
-    }
-    return changed;
-}
-
 // function to generate assignment of the varialbes, branch on them, find solutions and perform backtracking
 void generate_and_branch(const std::vector<int>& constraintsLeft, const std::vector<int>& constraintsRight, int* d_constraintsLeft, int* d_constraintsRight, int* d_numConstraints, std::vector<std::vector<bool>> domains, uint8_t *d_domains, std::vector<uint8_t> flatDomains,
         std::vector<int> offsets, int* d_offsets, std::stack<Node>& nodes, int* d_assignedVals, int* d_branchVar, size_t &numSolutions, int n) {
@@ -159,12 +120,12 @@ void generate_and_branch(const std::vector<int>& constraintsLeft, const std::vec
     while(true)
     {
         Node node = nodes.top();
-        bool changed = false;
         int currentOffset = 0;
         // perform fixed point iteration to remove values from the domains
-        if(node.branchedVar != n-1)
+        if(node.branchedVar < n-1)
         {
             do {
+                changed = false;
                 // clear flatDomains
                 flatDomains.clear();
                 currentOffset = 0;
@@ -195,10 +156,15 @@ void generate_and_branch(const std::vector<int>& constraintsLeft, const std::vec
                 // and the relative values, so that we actually have a solution
                 for(int i = node.branchedVar+1; i < n; i++) {
                     if(std::count(domains[i].begin(), domains[i].end(), 1) == 1) {
-                        // domain of the variable has only one value, corresponds to an assignment
-                        node.branchedVar = i;
-                        node.assignedVals.push_back(std::find(domains[i].begin(), domains[i].end(), 1) - domains[i].begin());
                         changed = true;
+                        // domain of the variable has only one value, corresponds to an assignment
+                        // push as many -1 values as (i-branchedVar-1) to the assignedVals vector
+                        // meaning that the variables between the last branched one and the current one
+                        // have not been assigned. BranchedVar stays the same
+                        for(int j = node.assignedVals.size(); j < i; j++) {
+                            node.assignedVals.push_back(-1);
+                        }
+                        node.assignedVals.push_back(std::find(domains[i].begin(), domains[i].end(), 1) - domains[i].begin());
                     }
                 }
             } while(changed);
@@ -293,7 +259,7 @@ void kernel_wrapper(std::vector<std::vector<bool>>& domains, const std::vector<i
     cudaError_t err;
 
     // flatten the domains and prepare offsets to access them on the device
-    // use uint8_t to store the domains, since bool is not supported by CUDA
+    // use uint8_t to store the domains
     std::vector<uint8_t> flatDomains;
     std::vector<int> offsets;
     int currentOffset = 0;
@@ -308,6 +274,7 @@ void kernel_wrapper(std::vector<std::vector<bool>>& domains, const std::vector<i
     // number of constraints
     int numConstraints = constraintsLeft.size();
 
+    // device variables
     uint8_t* d_domains;
     int* d_offsets;
     int* d_assignedVals;
@@ -315,7 +282,7 @@ void kernel_wrapper(std::vector<std::vector<bool>>& domains, const std::vector<i
     int* d_constraintsLeft;
     int* d_constraintsRight;
     int* d_numConstraints;
-    // Allocate and copy flattened domains
+    // allocate memory on the device for all necessary data structures
     err = cudaMalloc(&d_domains, sizeof(uint8_t) * flatDomains.size()); checkCudaError(err, __FILE__, __LINE__);    
     err = cudaMalloc(&d_offsets, sizeof(int) * offsets.size()); checkCudaError(err, __FILE__, __LINE__);
     err = cudaMalloc(&d_assignedVals, sizeof(int) * n); checkCudaError(err, __FILE__, __LINE__);
@@ -330,13 +297,13 @@ void kernel_wrapper(std::vector<std::vector<bool>>& domains, const std::vector<i
     err = cudaMemcpyAsync(d_numConstraints, &numConstraints, sizeof(int), cudaMemcpyHostToDevice); checkCudaError(err, __FILE__, __LINE__);
     // stack of nodes of the currently explored branch
     std::stack<Node> nodes;
-    // create root node that contains the initial domains, the first variable that 
-    // will be branched is 0
-    // declare two vectors of size n to hold the assigned variables and values
+    // vector to store the assigned values
     std::vector<int> assignedVals;
     assignedVals.push_back(0);
-    // remove the value from the domain of the variable
+    // create root node that contains the initial domains, the first variable that 
+    // will be branched is 0, we will proceed in increasing order
     Node root(assignedVals, 0);
+    // remove the value from the domain of the variable
     domains[0][assignedVals[0]] = 0;
     nodes.push(root);
 

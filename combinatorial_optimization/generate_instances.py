@@ -1,5 +1,6 @@
 import random
 import numpy as np
+import sys
 
 def generate_instance(n: int):
     random.seed(43)
@@ -29,4 +30,9 @@ def generate_instance(n: int):
 
 
 if __name__ == '__main__':
-    generate_instance(3)
+    # read number of variables from command line argument
+    if len(sys.argv) > 1:
+        n = sys.argv[1]
+        generate_instance(int(n))
+    else:
+        print("Please provide a valid number of variables")

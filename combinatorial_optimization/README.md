@@ -1,20 +1,20 @@
 ## Example - Input data format
 ```
-N               // indicate the number of variables in below
+N
 3
-U               // indicate upper bound for each variable, e.g. [variable id];[upper bound]
-0;49
-1;97
-2;53
-C               // indicate if the pair(i,j) in C, e.g. [i,j];[boolean] if true then (i,j) in C, otherwise not.
+U
+0;4
+1;36
+2;89
+C
 0,0;0
-0,1;1
+0,1;0
 0,2;1
-1,0;1
-1,1;1
+1,0;0
+1,1;0
 1,2;1
 2,0;1
-2,1;0
+2,1;1
 2,2;0
 ```
 
