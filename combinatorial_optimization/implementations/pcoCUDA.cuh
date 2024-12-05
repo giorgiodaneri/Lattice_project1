@@ -116,6 +116,7 @@ void generate_and_branch(const std::vector<int>& constraintsLeft, const std::vec
     
     cudaError_t err;
     bool changed = false;
+    // declare a vector of bools to store the singleton domains
     std::vector<bool> singletons(n, 0);
 
     while(true)

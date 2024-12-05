@@ -187,7 +187,7 @@ void generate_and_branch(const std::vector<int>& constraintsLeft, const std::vec
         }   
         else {
             // since a fixed point has been reached but we do not have a solution yet
-            // check if the next variable to branch has already an assigned value
+            // check if there exist singleton domains, i.e. the size of assignedVals is bigger than the current variable index
             if(node.assignedVals.size() > node.branchedVar+1) {
                 // check if the domain of the next variable to be assigned is empty
                 if(std::count(domains[node.branchedVar+1].begin(), domains[node.branchedVar+1].end(), 1) == 0) {

@@ -1,4 +1,12 @@
-## Example - Input data format
+# Parallel Combinatorial Optimization
+The problem consists in finding all the possible assignments of n variables that satisfy a set of constraints, where the assigned values are within the domains of each variable.
+
+## How to compile and run the code
+To build the code, I set up a Makefile to make it as easy as possible. To compile the serial version, use the ```make serial``` command. To compile the parallel version, first make sure your environment is set up with a CUDA toolkit version >= 11.1. On the Iris cluster, you can simply load the modules containing the NVIDIA drivers and CUDA libraries with the command ```ml toolchain/intelcuda```, then use the ```make``` command. 
+To execute the both the serial and parallel version, the user needs to provide the input file as a command line argument, e.g. ```./main pco_5.txt```. The input files containing the number of variables, their domains and the constraints can be generated with the script ```generate_instance.py```. The usage is as follows:
+```python3 generate_instance.py num_variables```. The user can also modify the range of the domains to adapt the test case to their needs. Some tast cases are already provided in the repository. 
+
+### Example - Input data format
 ```
 N
 3
@@ -17,27 +25,3 @@ C
 2,1;1
 2,2;0
 ```
-
-## Example - Read input data
-To read input data, you just need to `#include "parser.hpp"` in your code. Then, you can just call `read_input(filename)` to read input data.
-```cpp
-#include "parser.hpp"
-
-int main(){
-    Data data;
-    if (data.read_input("pco_3.txt")){
-        data.print_n();
-        data.print_u();
-        data.print_C();
-    }   
-
-    return 0;
-}
-```
-
-## Example - Generate more testing scenarios
-To implement more general algorithm, you can use `generate_instances.py` to generate large-scale problem instances. There is no package required in this python code.
-You just need to specify how many variables in your problem instance, then the code will generate random number to be upper bound for each variable and randomly select pair of `i` and `j` to be in `C`.
-
-
-All the code you can do modification to fit your scenarios.

@@ -1,9 +1,4 @@
 *.o
 main*
 check_res.py
-combinatorialOptBFS
-nqueens
-*.txt
 .vscode
-combinatorial_optimization/nqueens
-combinatorial_optimization/job.sh
