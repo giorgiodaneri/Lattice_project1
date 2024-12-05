@@ -116,11 +116,14 @@ void generate_and_branch(const std::vector<int>& constraintsLeft, const std::vec
     
     cudaError_t err;
     bool changed = false;
+    std::vector<bool> singletons(n, 0);
 
     while(true)
     {
+        singletons.clear();
         Node node = nodes.top();
         int currentOffset = 0;
+        // declare a vector of bools to store the singleton domains
         // perform fixed point iteration to remove values from the domains
         if(node.branchedVar < n-1)
         {
@@ -128,6 +131,7 @@ void generate_and_branch(const std::vector<int>& constraintsLeft, const std::vec
                 changed = false;
                 // clear flatDomains
                 flatDomains.clear();
+                offsets.clear();
                 currentOffset = 0;
                 // flatten the domains using the offsets
                 for (const auto& domain : domains) {
@@ -135,6 +139,7 @@ void generate_and_branch(const std::vector<int>& constraintsLeft, const std::vec
                     flatDomains.insert(flatDomains.end(), domain.begin(), domain.end());
                     currentOffset += domain.size();
                 }
+                
                 // copy the flatDomains to the device
                 err = cudaMemcpyAsync(d_domains, flatDomains.data(), sizeof(uint8_t) * flatDomains.size(), cudaMemcpyHostToDevice); checkCudaError(err, __FILE__, __LINE__);
                 err = cudaMemcpyAsync(d_assignedVals, node.assignedVals.data(), sizeof(int) * node.assignedVals.size(), cudaMemcpyHostToDevice); checkCudaError(err, __FILE__, __LINE__);
@@ -156,15 +161,20 @@ void generate_and_branch(const std::vector<int>& constraintsLeft, const std::vec
                 // and the relative values, so that we actually have a solution
                 for(int i = node.branchedVar+1; i < n; i++) {
                     if(std::count(domains[i].begin(), domains[i].end(), 1) == 1) {
-                        changed = true;
-                        // domain of the variable has only one value, corresponds to an assignment
-                        // push as many -1 values as (i-branchedVar-1) to the assignedVals vector
-                        // meaning that the variables between the last branched one and the current one
-                        // have not been assigned. BranchedVar stays the same
-                        for(int j = node.assignedVals.size(); j < i; j++) {
-                            node.assignedVals.push_back(-1);
+                        if(singletons[i] == 0) {
+                            singletons[i] = 1;
+                            changed = true;
+                            // domain of the variable has only one value, corresponds to an assignment
+                            // push as many -1 values as (i-branchedVar-1) to the assignedVals vector
+                            // meaning that the variables between the last branched one and the current one
+                            // have not been assigned. BranchedVar stays the same
+                            for(int j = node.assignedVals.size(); j < i; j++) {
+                                node.assignedVals.push_back(-1);
+                            }
+                            // if(node.assignedVals[i] >= 0) continue;
+                            // node.assignedVals[i] = std::find(domains[i].begin(), domains[i].end(), 1) - domains[i].begin();
+                            node.assignedVals.push_back(std::find(domains[i].begin(), domains[i].end(), 1) - domains[i].begin());
                         }
-                        node.assignedVals.push_back(std::find(domains[i].begin(), domains[i].end(), 1) - domains[i].begin());
                     }
                 }
             } while(changed);
@@ -197,6 +207,7 @@ void generate_and_branch(const std::vector<int>& constraintsLeft, const std::vec
                     // check if the stack is emtpy, then all solutions have been found
                     if(nodes.size() == 0) 
                     {   
+                        std::cout << "All solutions found" << std::endl;
                         return;
                     }
                     node = nodes.top();
@@ -216,12 +227,14 @@ void generate_and_branch(const std::vector<int>& constraintsLeft, const std::vec
                 nodes.push(node);
             } 
             else {
-                numSolutions++;
                 nodes.pop();
-                // iterate over all the remaining non zero values of the current branchedVar 
-                // all the configurations are solutions
+                // get range of valid values in the domain of the variable
                 int start = node.assignedVals.back()+1;
                 int maxValue = domains[node.branchedVar].size();
+                // iterate over all the remaining non zero values of the current branchedVar 
+                // all the configurations are solutions
+                numSolutions++;
+
                 for(int i = start; i < maxValue; ++i) 
                 {   
                     // remove the value from the domain of the variable
@@ -235,16 +248,51 @@ void generate_and_branch(const std::vector<int>& constraintsLeft, const std::vec
             }
         }   
         else {
-            // since a fixed point has been reached but we do not have a solution, we 
-            // need to branch on the next variable by artifically imposing an assignment
+            // since a fixed point has been reached but we do not have a solution yet
+            // check if the next variable to branch has already an assigned value
+            if(node.assignedVals.size() > node.branchedVar+1) {
+                // check if the domain of the next variable to be assigned is empty
+                if(std::count(domains[node.branchedVar+1].begin(), domains[node.branchedVar+1].end(), 1) == 0) {
+                    // since it is impossible to find a valid value for the current variable, the current
+                    // branch does not yields a solution => perform backtracking and find the next solution
+                    // also, clean assignedVals for all variables greater than the current one
+                    if(node.branchedVar+1 < n-1)
+                    {   
+                        for(int i = node.branchedVar+1; i < n; i++) {
+                            node.assignedVals.pop_back();
+                        }
+                    }
+                    node.branchedVar = n-1; 
+                    nodes.push(node);
+                    continue;   
+                }
+                // if it has an assigned value, just push the node to the stack
+                if(node.assignedVals[node.branchedVar+1] != -1) {
+                    node.branchedVar++;
+                    domains[node.branchedVar][node.assignedVals[node.branchedVar]] = 0;
+                    nodes.push(node);
+                    if(node.branchedVar == n-1) {
+                        numSolutions++;
+                        numSolutions++;
+                    }
+                    continue;
+                }
+            }
+
+            // if it does not have an assigned value,
+            // we need to branch on the next variable by artifically imposing an assignment
             // remove the value from the domain of the branch variable in the parent node
             // find the first non-zero value in the domain of branchedVar+1
             int newVal = std::find(domains[node.branchedVar+1].begin(), domains[node.branchedVar+1].end(), 1) - domains[node.branchedVar+1].begin();
             // set this value to 0 in the parent domain
             domains[node.branchedVar+1][newVal] = 0;
-            // node.domains[node.branchedVar+1][node.assignedVals[node.branchedVar]] = 0;
             std::vector<int> assignedVals = node.assignedVals;
-            assignedVals.push_back(newVal);
+            if(assignedVals.size() > node.branchedVar+1) {
+                assignedVals[node.branchedVar+1] = newVal;
+            }
+            else {
+                assignedVals.push_back(newVal);
+            }
             // select next variable to branch on as the one after branchedVar
             Node newNode(assignedVals, node.branchedVar+1);
             // and push the new node to the stack
@@ -285,7 +333,7 @@ void kernel_wrapper(std::vector<std::vector<bool>>& domains, const std::vector<i
     // allocate memory on the device for all necessary data structures
     err = cudaMalloc(&d_domains, sizeof(uint8_t) * flatDomains.size()); checkCudaError(err, __FILE__, __LINE__);    
     err = cudaMalloc(&d_offsets, sizeof(int) * offsets.size()); checkCudaError(err, __FILE__, __LINE__);
-    err = cudaMalloc(&d_assignedVals, sizeof(int) * n); checkCudaError(err, __FILE__, __LINE__);
+    err = cudaMalloc(&d_assignedVals, sizeof(int) * (n+10)); checkCudaError(err, __FILE__, __LINE__);
     err = cudaMalloc(&d_branchVar, sizeof(int)); checkCudaError(err, __FILE__, __LINE__);
     err = cudaMalloc(&d_constraintsLeft, sizeof(int) * constraintsLeft.size()); checkCudaError(err, __FILE__, __LINE__);
     err = cudaMalloc(&d_constraintsRight, sizeof(int) * constraintsRight.size()); checkCudaError(err, __FILE__, __LINE__);

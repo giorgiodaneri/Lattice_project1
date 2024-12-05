@@ -65,8 +65,11 @@ bool restrict_domains(const std::vector<int>& constraintsLeft, const std::vector
 void generate_and_branch(const std::vector<int>& constraintsLeft, const std::vector<int>& constraintsRight, std::vector<std::vector<bool>> domains, std::stack<Node>& nodes, size_t &numSolutions, int n) {
     bool loop = true;
     bool changed = false;
+    // declare a vector of bools to store the singleton domains
+    std::vector<bool> singletons(n, 0);
     while(loop)
     {
+        singletons.clear();
         Node node = nodes.top();
 
         // perform fixed point iteration to remove values from the domains
@@ -76,24 +79,39 @@ void generate_and_branch(const std::vector<int>& constraintsLeft, const std::vec
             do {
                 changed = false;
                 changed = restrict_domains(constraintsLeft, constraintsRight, domains, node);
-            
                 // find all the variables that have been forcefully assigned due to constraint application
                 // and the relative values, so that we actually have a solution
                 // only check the domains of the variables that are > branchedVar, since the others are already assigned
                 if(changed)
                 {   
                     changed = false;
+                    // check if singleton domains has changed
                     for(int i = node.branchedVar+1; i < n; i++) {
                         if(std::count(domains[i].begin(), domains[i].end(), 1) == 1) {
-                            changed = true;
-                            // domain of the variable has only one value, corresponds to an assignment
-                            // push as many -1 values as (i-branchedVar-1) to the assignedVals vector
-                            // meaning that the variables between the last branched one and the current one
-                            // have not been assigned. BranchedVar stays the same
-                            for(int j = node.assignedVals.size(); j < i; j++) {
-                                node.assignedVals.push_back(-1);
+                            if(singletons[i] == 0) {
+                                singletons[i] = 1;
+                                changed = true;
+                                // domain of the variable has only one value, corresponds to an assignment
+                                // push as many -1 values as (i-branchedVar-1) to the assignedVals vector
+                                // meaning that the variables between the last branched one and the current one
+                                // have not been assigned. BranchedVar stays the same
+                                for(int j = node.assignedVals.size(); j < i; j++) {
+                                    node.assignedVals.push_back(-1);
+                                }
+                                // if(node.assignedVals[i] >= 0) continue;
+                                // node.assignedVals[i] = std::find(domains[i].begin(), domains[i].end(), 1) - domains[i].begin();
+                                node.assignedVals.push_back(std::find(domains[i].begin(), domains[i].end(), 1) - domains[i].begin());
+                                if(node.assignedVals.size() >= 8)
+                                {
+                                    std::cout << "ERROR AFTER PUSHBACK Assigned values: ";
+                                    for(int i = 0; i < node.assignedVals.size(); i++) {
+                                        std::cout << node.assignedVals[i] << " ";
+                                    }
+                                    std::cout << std::endl;
+                                    return;
+                                }
                             }
-                            node.assignedVals.push_back(std::find(domains[i].begin(), domains[i].end(), 1) - domains[i].begin());
+                            
                         }
                     }
                 }
@@ -192,6 +210,7 @@ void generate_and_branch(const std::vector<int>& constraintsLeft, const std::vec
                     domains[node.branchedVar][node.assignedVals[node.branchedVar]] = 0;
                     nodes.push(node);
                     if(node.branchedVar == n-1) {
+                        numSolutions++;
                         numSolutions++;
                     }
                     continue;
