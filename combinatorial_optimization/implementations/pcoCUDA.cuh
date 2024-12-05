@@ -3,11 +3,11 @@
 #include <vector>
 #include <chrono>
 #include <algorithm>
-#include <stack>  
+#include <stack>
 #include <thread>
 
 #define BLOCK_SIZE 16
-#define SHARED_SIZE 128
+#define SHARED_SIZE 256
 
 struct Node {
     // vector of corresponding assigned values
@@ -30,12 +30,12 @@ struct Node {
 
 __global__ void restrictDomainsKernel(
     const int* d_constraintsLeft, const int* d_constraintsRight, int* numConstraints,
-    uint8_t* d_domains, const int* d_offsets, 
-    const int* d_assignedVals, const int* d_branchVar) 
+    uint8_t* d_domains, const int* d_offsets,
+    const int* d_assignedVals, const int* d_branchVar)
 {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     // if thread index exceeds number of constraints return
-    if (tid >= *numConstraints) return; 
+    if (tid >= *numConstraints) return;
     // fetch the current constraint left and right variables
     int var1 = d_constraintsLeft[tid];
     int var2 = d_constraintsRight[tid];
@@ -64,15 +64,15 @@ __global__ void restrictDomainsKernel(
 
 __global__ void restrictDomainsKernelShared(
     const int* d_constraintsLeft, const int* d_constraintsRight, int* numConstraints,
-    uint8_t* d_domains, const int* d_offsets, 
-    const int* d_assignedVals, const int* d_branchVar) 
+    uint8_t* d_domains, const int* d_offsets,
+    const int* d_assignedVals, const int* d_branchVar)
 {
     // use shared memory to store the constraints
-    __shared__ int s_constraintsLeft[SHARED_SIZE];  
-    __shared__ int s_constraintsRight[SHARED_SIZE]; 
+    __shared__ int s_constraintsLeft[SHARED_SIZE];
+    __shared__ int s_constraintsRight[SHARED_SIZE];
     // global thread id and block thread id
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
-    int blockTid = threadIdx.x;  
+    int blockTid = threadIdx.x;
     // load constraints into shared memory, only for the current block
     if (blockTid < *numConstraints) {
         s_constraintsLeft[blockTid] = d_constraintsLeft[tid];
@@ -81,7 +81,7 @@ __global__ void restrictDomainsKernelShared(
 
     // thread index exceeds number of constraints, exit
     if (tid >= *numConstraints) return;
-    // fetch current constraint 
+    // fetch current constraint
     int var1 = s_constraintsLeft[blockTid];
     int var2 = s_constraintsRight[blockTid];
     // same reasoning as the kernel using global memory
@@ -110,21 +110,54 @@ void checkCudaError(cudaError_t err, const char* file, int line) {
     }
 }
 
+// function to configure the kernel parameters
+void configureKernel(int numConstraints, dim3& blockSize, dim3& gridSize) {
+    // get the current device and its properties
+    int device;
+    cudaDeviceProp props;
+    cudaGetDevice(&device);
+    cudaGetDeviceProperties(&props, device);
+    // compute the maximum block size based on warp size and constraints
+    int warpSize = props.warpSize;
+    int maxThreadsPerBlock = props.maxThreadsPerBlock;
+    int sharedMemoryPerBlock = props.sharedMemPerBlock;
+    // each constraint uses 2 integers in shared memory
+    int sharedMemoryPerConstraint = 2 * sizeof(int);
+    // compute max constraints that fit in shared memory
+    int maxConstraintsSharedMem = sharedMemoryPerBlock / sharedMemoryPerConstraint;
+    // block size compute as min of max threads, warp-aligned, and shared memory constraints
+    int optimalBlockSize = std::min(maxThreadsPerBlock, maxConstraintsSharedMem);
+    optimalBlockSize = (optimalBlockSize / warpSize) * warpSize; // Align to warp size
+    // at least 1 block handles constraints
+    blockSize.x = optimalBlockSize;
+    blockSize.y = 1;
+    blockSize.z = 1;
+    // grid size must cover all constraints
+    gridSize.x = (numConstraints + optimalBlockSize - 1) / optimalBlockSize;
+    gridSize.y = 1;
+    gridSize.z = 1;
+}
+
 // function to generate assignment of the varialbes, branch on them, find solutions and perform backtracking
 void generate_and_branch(const std::vector<int>& constraintsLeft, const std::vector<int>& constraintsRight, int* d_constraintsLeft, int* d_constraintsRight, int* d_numConstraints, std::vector<std::vector<bool>> domains, uint8_t *d_domains, std::vector<uint8_t> flatDomains,
         std::vector<int> offsets, int* d_offsets, std::stack<Node>& nodes, int* d_assignedVals, int* d_branchVar, size_t &numSolutions, int n) {
-    
+
     cudaError_t err;
+    dim3 blockSize;
+    dim3 gridSize;
+    // configure the kernel parameters
+    configureKernel(constraintsLeft.size(), blockSize, gridSize);
+
     bool changed = false;
     // declare a vector of bools to store the singleton domains
     std::vector<bool> singletons(n, 0);
 
     while(true)
     {
+        // reset singletons and offsets, fetch the current node
         singletons.clear();
-        Node node = nodes.top();
         int currentOffset = 0;
-        // declare a vector of bools to store the singleton domains
+        Node node = nodes.top();
         // perform fixed point iteration to remove values from the domains
         if(node.branchedVar < n-1)
         {
@@ -140,13 +173,13 @@ void generate_and_branch(const std::vector<int>& constraintsLeft, const std::vec
                     flatDomains.insert(flatDomains.end(), domain.begin(), domain.end());
                     currentOffset += domain.size();
                 }
-                
+
                 // copy the flatDomains to the device
                 err = cudaMemcpyAsync(d_domains, flatDomains.data(), sizeof(uint8_t) * flatDomains.size(), cudaMemcpyHostToDevice); checkCudaError(err, __FILE__, __LINE__);
                 err = cudaMemcpyAsync(d_assignedVals, node.assignedVals.data(), sizeof(int) * node.assignedVals.size(), cudaMemcpyHostToDevice); checkCudaError(err, __FILE__, __LINE__);
                 err = cudaMemcpyAsync(d_branchVar, &node.branchedVar, sizeof(int), cudaMemcpyHostToDevice); checkCudaError(err, __FILE__, __LINE__);
                 // launch the kernel to restrict the domains
-                restrictDomainsKernelShared<<<BLOCK_SIZE, BLOCK_SIZE>>>(d_constraintsLeft, d_constraintsRight, d_numConstraints, d_domains, d_offsets, d_assignedVals, d_branchVar);
+                restrictDomainsKernelShared<<<gridSize, blockSize>>>(d_constraintsLeft, d_constraintsRight, d_numConstraints, d_domains, d_offsets, d_assignedVals, d_branchVar);
                 // copy the flatDomains back to the host
                 err = cudaMemcpyAsync(flatDomains.data(), d_domains, sizeof(uint8_t) * flatDomains.size(), cudaMemcpyDeviceToHost); checkCudaError(err, __FILE__, __LINE__);
                 // update the domains
@@ -172,8 +205,6 @@ void generate_and_branch(const std::vector<int>& constraintsLeft, const std::vec
                             for(int j = node.assignedVals.size(); j < i; j++) {
                                 node.assignedVals.push_back(-1);
                             }
-                            // if(node.assignedVals[i] >= 0) continue;
-                            // node.assignedVals[i] = std::find(domains[i].begin(), domains[i].end(), 1) - domains[i].begin();
                             node.assignedVals.push_back(std::find(domains[i].begin(), domains[i].end(), 1) - domains[i].begin());
                         }
                     }
@@ -198,7 +229,7 @@ void generate_and_branch(const std::vector<int>& constraintsLeft, const std::vec
             // if there are still values in its domain
             // check if the domain of the variable is empty, if it is need to perform backtracking
             if(std::count(domains[node.branchedVar].begin(), domains[node.branchedVar].end(), 1) == 0)
-            {      
+            {
                 int depth = 0;
                 nodes.pop();
                 node = nodes.top();
@@ -206,8 +237,8 @@ void generate_and_branch(const std::vector<int>& constraintsLeft, const std::vec
                 // backtrack until a variable with a non-empty domain is found
                 while(std::count(domains[node.branchedVar].begin(), domains[node.branchedVar].end(), 1) == 0) {
                     // check if the stack is emtpy, then all solutions have been found
-                    if(nodes.size() == 0) 
-                    {   
+                    if(nodes.size() == 0)
+                    {
                         std::cout << "All solutions found" << std::endl;
                         return;
                     }
@@ -226,18 +257,18 @@ void generate_and_branch(const std::vector<int>& constraintsLeft, const std::vec
                 domains[node.branchedVar][nextVal] = 0;
                 node.assignedVals[node.branchedVar] = nextVal;
                 nodes.push(node);
-            } 
+            }
             else {
                 nodes.pop();
                 // get range of valid values in the domain of the variable
                 int start = node.assignedVals.back()+1;
                 int maxValue = domains[node.branchedVar].size();
-                // iterate over all the remaining non zero values of the current branchedVar 
+                // iterate over all the remaining non zero values of the current branchedVar
                 // all the configurations are solutions
                 numSolutions++;
 
-                for(int i = start; i < maxValue; ++i) 
-                {   
+                for(int i = start; i < maxValue; ++i)
+                {
                     // remove the value from the domain of the variable
                     if(domains[node.branchedVar][i] == 1) {
                         numSolutions++;
@@ -247,7 +278,7 @@ void generate_and_branch(const std::vector<int>& constraintsLeft, const std::vec
                 node.assignedVals[node.branchedVar] = maxValue-1;
                 nodes.push(node);
             }
-        }   
+        }
         else {
             // since a fixed point has been reached but we do not have a solution yet
             // check if the next variable to branch has already an assigned value
@@ -258,14 +289,14 @@ void generate_and_branch(const std::vector<int>& constraintsLeft, const std::vec
                     // branch does not yields a solution => perform backtracking and find the next solution
                     // also, clean assignedVals for all variables greater than the current one
                     if(node.branchedVar+1 < n-1)
-                    {   
+                    {
                         for(int i = node.branchedVar+1; i < n; i++) {
                             node.assignedVals.pop_back();
                         }
                     }
-                    node.branchedVar = n-1; 
+                    node.branchedVar = n-1;
                     nodes.push(node);
-                    continue;   
+                    continue;
                 }
                 // if it has an assigned value, just push the node to the stack
                 if(node.assignedVals[node.branchedVar+1] != -1) {
@@ -332,13 +363,13 @@ void kernel_wrapper(std::vector<std::vector<bool>>& domains, const std::vector<i
     int* d_constraintsRight;
     int* d_numConstraints;
     // allocate memory on the device for all necessary data structures
-    err = cudaMalloc(&d_domains, sizeof(uint8_t) * flatDomains.size()); checkCudaError(err, __FILE__, __LINE__);    
+    err = cudaMalloc(&d_domains, sizeof(uint8_t) * flatDomains.size()); checkCudaError(err, __FILE__, __LINE__);
     err = cudaMalloc(&d_offsets, sizeof(int) * offsets.size()); checkCudaError(err, __FILE__, __LINE__);
     err = cudaMalloc(&d_assignedVals, sizeof(int) * (n+10)); checkCudaError(err, __FILE__, __LINE__);
     err = cudaMalloc(&d_branchVar, sizeof(int)); checkCudaError(err, __FILE__, __LINE__);
     err = cudaMalloc(&d_constraintsLeft, sizeof(int) * constraintsLeft.size()); checkCudaError(err, __FILE__, __LINE__);
     err = cudaMalloc(&d_constraintsRight, sizeof(int) * constraintsRight.size()); checkCudaError(err, __FILE__, __LINE__);
-    err = cudaMalloc(&d_numConstraints, sizeof(int)); checkCudaError(err, __FILE__, __LINE__);  
+    err = cudaMalloc(&d_numConstraints, sizeof(int)); checkCudaError(err, __FILE__, __LINE__);
     // copy constraints only once, since they never change
     err = cudaMemcpyAsync(d_constraintsLeft, constraintsLeft.data(), sizeof(int) * constraintsLeft.size(), cudaMemcpyHostToDevice); checkCudaError(err, __FILE__, __LINE__);
     err = cudaMemcpyAsync(d_constraintsRight, constraintsRight.data(), sizeof(int) * constraintsRight.size(), cudaMemcpyHostToDevice); checkCudaError(err, __FILE__, __LINE__);
@@ -349,7 +380,7 @@ void kernel_wrapper(std::vector<std::vector<bool>>& domains, const std::vector<i
     // vector to store the assigned values
     std::vector<int> assignedVals;
     assignedVals.push_back(0);
-    // create root node that contains the initial domains, the first variable that 
+    // create root node that contains the initial domains, the first variable that
     // will be branched is 0, we will proceed in increasing order
     Node root(assignedVals, 0);
     // remove the value from the domain of the variable

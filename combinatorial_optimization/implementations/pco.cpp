@@ -68,7 +68,8 @@ void generate_and_branch(const std::vector<int>& constraintsLeft, const std::vec
     // declare a vector of bools to store the singleton domains
     std::vector<bool> singletons(n, 0);
     while(loop)
-    {
+    {   
+        // reset singletons and fetch the current node
         singletons.clear();
         Node node = nodes.top();
 
@@ -98,18 +99,7 @@ void generate_and_branch(const std::vector<int>& constraintsLeft, const std::vec
                                 for(int j = node.assignedVals.size(); j < i; j++) {
                                     node.assignedVals.push_back(-1);
                                 }
-                                // if(node.assignedVals[i] >= 0) continue;
-                                // node.assignedVals[i] = std::find(domains[i].begin(), domains[i].end(), 1) - domains[i].begin();
                                 node.assignedVals.push_back(std::find(domains[i].begin(), domains[i].end(), 1) - domains[i].begin());
-                                if(node.assignedVals.size() >= 8)
-                                {
-                                    std::cout << "ERROR AFTER PUSHBACK Assigned values: ";
-                                    for(int i = 0; i < node.assignedVals.size(); i++) {
-                                        std::cout << node.assignedVals[i] << " ";
-                                    }
-                                    std::cout << std::endl;
-                                    return;
-                                }
                             }
                             
                         }
